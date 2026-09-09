@@ -42,7 +42,7 @@ export interface TableNames {
 
 /** 查询通道与聚合路由配置（§14.10 三层路由）。 */
 export interface QueryConfig {
-  /** 层1：时序数据查询通道。 */
+  /** 层1：时序数据查询通道。rest = TSDB HTTP 网关（需 baseUrl + 鉴权三头）。 */
   tsdbChannel: 'sql' | 'rest'
   /** REST 通道配置（tsdbChannel='rest' 时生效）。 */
   rest: {
@@ -50,7 +50,11 @@ export interface QueryConfig {
     wtAppid: string
     wtToken: string
     wtOpenid: string
+    /** REST 调用失败时自动回落 SQL 通道（默认开；关闭则失败直接返回）。 */
+    fallbackToSql: boolean
   }
+  /** 是否启用预聚合表路由（false = 强制只用 WT_DATA 全聚合；通用行业/口径存疑时关闭）。 */
+  useAggregateTable: boolean
   /** 层2：聚合表名（空串 = 强制只用 WT_DATA，通用行业）。 */
   aggregateTable: string
   /** 层2：cubeType 映射（光伏特定，空对象 = 不做 cubeType 路由）。 */
@@ -171,7 +175,8 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
   tables: { tag: 'WT_TAG', data: 'WT_DATA', cube: 'WT_CUBE', device: 'WT_DEVICE' },
   query: {
     tsdbChannel: 'sql',
-    rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '' },
+    rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true },
+    useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
     granularityMap: DEFAULT_GRANULARITY_MAP,
@@ -255,6 +260,9 @@ export function resolveConfig(input: {
   }
   if (query.tsdbChannel !== 'sql' && query.tsdbChannel !== 'rest') {
     throw new Error(`配置错误：query.tsdbChannel 只允许 'sql' / 'rest'，收到: ${query.tsdbChannel}`)
+  }
+  if (query.tsdbChannel === 'rest' && !query.rest.baseUrl) {
+    throw new Error('配置错误：query.tsdbChannel=rest 时必须配置 query.rest.baseUrl（TSDB HTTP 网关地址）')
   }
 
   return {

@@ -461,19 +461,19 @@ P1 实现完成后，用 `scripts/e2e-p1.ts` 验证以下场景（§16 实测验
 ```yaml
 query:
   # 层1：时序数据查询通道
-  tsdbChannel: 'sql'        # 'sql'(默认,StarRocks直连) | 'rest'(AGP REST API)
+  tsdbChannel: 'sql'        # 'sql'(默认,StarRocks直连) | 'rest'(TSDB HTTP 网关实时值)
   
-  # 层1：REST 通道配置（tsdbChannel='rest' 时生效）
+  # 层1：REST 通道配置（tsdbChannel='rest' 时生效；baseUrl 必填，加载期校验）
   rest:
-    baseUrl: ''             # AGP REST 基址，如 'https://agp.sksyri.com/s1M6_uE9/wz/iot-etl/iot/'
-    # 或后端代理：'http://192.168.101.54:PORT/rtdb/'
+    baseUrl: ''             # 网关基址，如 'http://192.168.101.54:8040/iot-etl/iot'
     wtAppid: ''             # 鉴权三头
-    wtToken: ''
+    wtToken: ''             # 密文（页面 secret 角色）
     wtOpenid: ''
+    fallbackToSql: true     # REST 失败（不可达/响应不合法）自动回落 SQL；false = 直接失败
   
-  # 层2：聚合表名（光伏特定）
-  aggregateTable: 'WT_CUBE' # 默认 'WT_CUBE'；设为 null 则强制只用 WT_DATA
-  # null 适用场景：非光伏行业 / WT_CUBE 数据不可信 / 调试
+  # 层2：预聚合路由开关 + 聚合表名（光伏特定）
+  useAggregateTable: true   # false = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑/调试）
+  aggregateTable: 'WT_CUBE' # 聚合表名；置空串等效关闭路由
   
   # 层2：cubeType 映射（光伏特定，从 CubeType.java 枚举提取）
   cubeTypeMap:
@@ -497,7 +497,7 @@ query:
 | 通道 | 优势 | 劣势 | 适用场景 | 状态 |
 |---|---|---|---|---|
 | **StarRocks SQL** | 最快、最灵活、已 P0 验证、免鉴权 | 需数据库直连、需白名单维护 | 默认通道 | ✅ P0 |
-| **REST /iot-etl/iot/tag/*** | 官方推荐、免数据库直连、走网关 | 需网关可达、鉴权三头、公网延迟 | 网关可用时 | P1 候选 |
+| **REST /iot-etl/iot/tag/*** | 官方推荐、免数据库直连、走网关 | 需网关可达、鉴权三头、公网延迟 | latest_value 主路已实现（`iotRealTimeValue`，失败按 `fallbackToSql` 回落 SQL）；**网关 2026-09-09 实测未部署**（ECONNREFUSED/404） | ✅ 代码就绪 |
 | **REST /rtdb/*** | 免 Ice 客户端、后端代理 | 需后端服务可达、端口待实测 | 后端可达时 | P2 候选 |
 | **Ice API** | 功能最全（10 方法） | python 搁置、Ice 3.7 兼容 | 搁置 | ❌ |
 | **WT-SQL** | 模板化、中文查询 | 无光伏场景方案 | 复用需自建 | P2 候选 |
@@ -549,7 +549,7 @@ query:
 | StarRocks 连接 | host* · port(9030) · user(askdata_ro) · password · database* · driver(mysql2/cli) · cliPath | P0 必配；生产必须只读账号 |
 | MySQL 业务库 | host('') · port(3306) · user('') · password · database(wisetao_meta) | 留空则 P1 六工具调用期报 `BACKEND_DOWN` |
 | 业务范围 | appId(10062) · tables.tag/data/cube/device | 模型与告警的过滤范围；表名按部署改 |
-| 查询路由 | tsdbChannel(sql/rest) · rest.baseUrl/wtAppid/wtToken/wtOpenid · aggregateTable(WT_CUBE) · cubeTypeMapJson · granularityMapJson | §14.10 三层路由；`aggregateTable` 置空退回纯 WT_DATA；JSON 置 `{}` 关闭对应路由 |
+| 查询路由 | tsdbChannel(sql/rest，取数通道优先级) · rest.baseUrl/wtAppid/wtToken/wtOpenid/**fallbackToSql** · **useAggregateTable(是否使用 WT_CUBE)** · aggregateTable(WT_CUBE) · cubeTypeMapJson · granularityMapJson | §14.10 三层路由；rest 通道 latest_value 走网关实时值，失败按 fallbackToSql 回落 SQL；`useAggregateTable=false` 或 `aggregateTable` 置空 → 只用 WT_DATA；JSON 置 `{}` 关闭对应路由 |
 | 护栏阈值 | maxScanRows(1亿) · maxTimeRangeDays(365) · badValueMask(128) · queryTimeoutMs(15000) · maxLimit(10000) · defaultLimit(1000) · defaultLookupLimit(100) · defaultAlarmLimit(100) · timeZone(+08:00) | 全部执行前机械生效 |
 | 安全 | tableWhitelist · mysqlTableWhitelist · scanGuard(true) | 白名单外表 → `SENSITIVE_TABLE`；readOnly 不开放 |
 | 审计 | enabled(false) · table · userId/appId/orgId | 进程内哈希链；落库 P2 |
@@ -575,6 +575,7 @@ query:
 | 8 | mysqlConnection 默认值烙印内网 IP + root | 默认留空（P0 面不受影响，P1 工具调用期报明确 BACKEND_DOWN）；patch 文件标注 DEV-ONLY | `src/config.ts`、`src/dsh/plugin.ts`、`cordis.patch.yml` |
 | 9 | CLI 通道 SQL 走 argv `-e`（进程列表可见、受命令行长度限制） | SQL 改经 stdin 送达（对齐 dsh-data-agent 通道约定） | `src/clients/starrocks.ts` |
 | 10 | 工具内嵌第二套默认行数（违反"阈值全走 config"约定）；词法预处理先剥注释后剥字符串（串内 `--`/`#` 干扰闸门视角） | defaultLimit/defaultLookupLimit/defaultAlarmLimit 入配置；字符串先于注释剥离 | `src/config.ts`、`src/sql/whitelist.ts` |
+| 11 | WT_TAG 字典过滤用 `regexp()` 全表扫（236 万行，负载下 6.7s~30s+），是 aggregate/time_series 每次调用的前置步骤 | 可解析前缀（`^tagCode_粒度_[device]`）改用等值（唯一索引，30ms）/ LIKE 前缀（86ms），regexp 仅作非保守形态兜底（`tagFilterPredicate`） | `src/sql/templates.ts` |
 
 **遗留（转后续）**：
 - `docs/spec/tools_v3.json` 未含 P1 六工具——规格副本须从 `D:\svn\WISETao_custom_demo\docs` 源目录同步（AGENTS.md 规矩，本仓库不手改 spec）。

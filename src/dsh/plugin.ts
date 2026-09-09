@@ -76,15 +76,18 @@ export const Config = z.object({
 
   query: z.object({
     tsdbChannel: z.union([z.const('sql'), z.const('rest')]).default('sql')
-      .description('层1 时序查询通道：sql = StarRocks 直连（默认，已验证）；rest = AGP REST 网关（P2 候选）'),
+      .description('层1 时序取数通道优先级：sql = StarRocks 直连（默认，已验证）；rest = TSDB HTTP 网关实时值接口（需下方 baseUrl + 鉴权三头；latest_value 走网关，失败按"REST 失败回落 SQL"处理）'),
     rest: z.object({
-      baseUrl: z.string().default('').description('AGP REST 基址（tsdbChannel=rest 时生效）'),
-      wtAppid: z.string().default('').description('鉴权头 wt-appid'),
-      wtToken: z.string().role('secret').default('').description('鉴权头 wt-token（密文）'),
-      wtOpenid: z.string().default('').description('鉴权头 wt-openid'),
-    }).collapse().description('REST 通道鉴权'),
+      baseUrl: z.string().default('').description('TSDB HTTP 网关基址（tsdbChannel=rest 时必填，如 http://host/iot-etl/iot）'),
+      wtAppid: z.string().default('').description('鉴权头 WT-APPID'),
+      wtToken: z.string().role('secret').default('').description('鉴权头 WT-TOKEN（密文）'),
+      wtOpenid: z.string().default('').description('鉴权头 WT-OPENID'),
+      fallbackToSql: z.boolean().default(true).description('REST 调用失败（网关不可达/响应不合法）时自动回落 SQL 通道；关闭则失败直接返回'),
+    }).collapse().description('REST 通道（TSDB HTTP 网关）'),
+    useAggregateTable: z.boolean().default(true)
+      .description('是否使用 WT_CUBE 预聚合路由：开启后 aggregate 对 1H/1D/1M/1Y 粒度 tag 自动查聚合表（快）；关闭 = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),
     aggregateTable: z.string().default('WT_CUBE')
-      .description('层2 聚合表路由：1H/1D/1M/1Y 粒度查该表；设为空串则只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),
+      .description('层2 聚合表名（useAggregateTable 开启时生效；置空串等效关闭路由）'),
     cubeTypeMapJson: z.string().role('textarea').default(JSON.stringify(DEFAULT_CUBE_TYPE_MAP, null, 2))
       .description('cubeType → 中文口径映射（JSON 对象；aggregate 路由与解释用。留空 {} = 不做 cubeType 路由）'),
     granularityMapJson: z.string().role('textarea').default(JSON.stringify(DEFAULT_GRANULARITY_MAP, null, 2))
@@ -165,6 +168,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
     query: {
       tsdbChannel: config.query.tsdbChannel,
       rest: config.query.rest,
+      useAggregateTable: config.query.useAggregateTable,
       aggregateTable: config.query.aggregateTable,
       cubeTypeMap: parseJsonMapField('query.cubeTypeMapJson', config.query.cubeTypeMapJson) as Record<number, string>,
       granularityMap: parseJsonMapField('query.granularityMapJson', config.query.granularityMapJson) as Record<string, number>,

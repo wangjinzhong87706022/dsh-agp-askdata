@@ -56,6 +56,17 @@ export interface SqlPlan {
   fields: ResultField[]
   /** 行 → AGP data 行（含类型转换）。 */
   shape(rows: Record<string, string | null>[]): Record<string, unknown>[]
+  /**
+   * 载体：'sql'（默认）= SQL 语句，派发前过白名单闸门；
+   * 'http' = REST 调用，`sql` 字段承载请求 URL（ToolResult.apiOrSql 契约），
+   * 不做 SQL 分类/白名单校验。
+   */
+  transport?: 'sql' | 'http'
+  /**
+   * 自定义执行闭包（REST 等非 SQL 载体用）：提供时取代默认执行器，
+   * `sql` 字段仅作展示（apiOrSql）。
+   */
+  execute?(signal?: AbortSignal): Promise<QueryOutput>
 }
 
 /** 数值列转换：null/undefined 透传为 null，其余 Number。 */
@@ -87,10 +98,13 @@ export async function runSqlTool(
     if (ctx.signal?.aborted) throw askdataError('BACKEND_DOWN', '工具调用已被取消')
     const p = await plan()
     sql = p.sql
-    const whitelist = options?.whitelist ?? ctx.config.security.tableWhitelist
-    assertSafeToExecute(sql, whitelist)
-    const executor = options?.executor ?? ctx.executor
-    const out = await executor.execute(sql, { signal: ctx.signal })
+    if (p.transport !== 'http') {
+      const whitelist = options?.whitelist ?? ctx.config.security.tableWhitelist
+      assertSafeToExecute(sql, whitelist)
+    }
+    const out = p.execute
+      ? await p.execute(ctx.signal)
+      : await (options?.executor ?? ctx.executor).execute(sql, { signal: ctx.signal })
     const data = p.shape(out.rows)
     const result = ok(tool.name, {
       apiOrSql: sql,

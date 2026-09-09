@@ -80,6 +80,7 @@ export const aggregateTool: AskdataTool = {
         ? ctx.config.query.granularityMap[filterParts.granularity]
         : undefined
       const cubeEligible =
+        ctx.config.query.useAggregateTable &&
         ctx.config.query.aggregateTable !== '' &&
         filterParts !== null &&
         granularityNum !== undefined &&

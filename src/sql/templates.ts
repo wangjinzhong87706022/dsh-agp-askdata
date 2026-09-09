@@ -10,7 +10,7 @@
 
 import type { AskdataConfig } from '../config.ts'
 import { qualityFilter } from './quality.ts'
-import { splitSegment } from './tagname.ts'
+import { parseTagFilterPrefix, splitSegment } from './tagname.ts'
 import { toSqlTimestamp, type AggFunc, type GroupByDim, type Granularity, type TimeBucket } from './validate.ts'
 
 /** LIKE 关键字转义：`\` `%` `_` 与单引号。 */
@@ -226,12 +226,28 @@ export function extractGranularityFromFilter(tagFilter: string): string | null {
   return null
 }
 
-/** 预查 tagIndex：按 tagName 正则过滤 WT_TAG，返回 tagIndex 列表（§14.10 tagIndex 过滤优化）。 */
+/**
+ * WT_TAG 字典过滤谓词：可解析前缀（`^tagCode_粒度_[device]`）时用等值/LIKE 前缀
+ * （唯一索引/short key 前缀，实测 30-90ms），否则退回 regexp（全表扫，
+ * 2026-09-09 实测 6.7s vs 0.03s，负载慢时 30s+）。
+ */
+export function tagFilterPredicate(tagFilter: string): string {
+  const parts = parseTagFilterPrefix(tagFilter)
+  if (parts?.deviceId) {
+    return `tagName = ${escapeSqlString(`${parts.tagCode}_${parts.granularity}_${parts.deviceId}`)}`
+  }
+  if (parts) {
+    return `tagName LIKE '${escapeLike(`${parts.tagCode}_${parts.granularity}_`)}%'`
+  }
+  return `regexp(tagName, ${escapeSqlString(tagFilter)})`
+}
+
+/** 预查 tagIndex：按 tag_filter 过滤 WT_TAG（谓词见 tagFilterPredicate）。 */
 export function tagIndexByFilterSql(config: AskdataConfig, tagFilter: string): string {
   return [
     'SELECT tagIndex',
     `FROM ${config.tables.tag}`,
-    `WHERE regexp(tagName, ${escapeSqlString(tagFilter)})`,
+    `WHERE ${tagFilterPredicate(tagFilter)}`,
   ].join('\n')
 }
 
@@ -250,7 +266,7 @@ export function timeSeriesByTagIndexSql(
   const where = [
     `a.\`timestamp\` >= ${toSqlTimestamp(args.startIso, config.system.timeZone)}`,
     `a.\`timestamp\` < ${toSqlTimestamp(args.endIso, config.system.timeZone)}`,
-    `a.tagIndex IN (SELECT tagIndex FROM ${config.tables.tag} WHERE regexp(tagName, ${escapeSqlString(args.tagFilter)}))`,
+    `a.tagIndex IN (SELECT tagIndex FROM ${config.tables.tag} WHERE ${tagFilterPredicate(args.tagFilter)})`,
     qualityFilter('a.`quality`', args.badValueMask),
   ]
   const from = [`FROM ${config.tables.data} a`]
@@ -294,7 +310,7 @@ export function aggregateByTagIndexSql(
   const where = [
     `a.\`timestamp\` >= ${toSqlTimestamp(args.startIso, config.system.timeZone)}`,
     `a.\`timestamp\` < ${toSqlTimestamp(args.endIso, config.system.timeZone)}`,
-    `a.tagIndex IN (SELECT tagIndex FROM ${config.tables.tag} WHERE regexp(tagName, ${escapeSqlString(args.tagFilter)}))`,
+    `a.tagIndex IN (SELECT tagIndex FROM ${config.tables.tag} WHERE ${tagFilterPredicate(args.tagFilter)})`,
     qualityFilter('a.`quality`', args.badValueMask),
   ]
   const { select, groupBy } = groupByExpression(args.groupBy)

@@ -277,11 +277,19 @@ describe('P1 优化模板', () => {
     expect(extractGranularityFromFilter('^no_granularity')).toBeNull()
   })
 
-  it('tagIndexByFilterSql: 预查 tagIndex', () => {
+  it('tagIndexByFilterSql: 预查 tagIndex（可解析前缀走 LIKE，regexp 兜底）', () => {
     const sql = tagIndexByFilterSql(config, '^HWNBYC174_1O_')
     expect(sql).toContain('SELECT tagIndex')
     expect(sql).toContain('FROM WT_TAG')
-    expect(sql).toContain("regexp(tagName, '^HWNBYC174_1O_')")
+    // LIKE 前缀（唯一索引/short key，实测 86ms vs regexp 6.7s）
+    expect(sql).toContain("tagName LIKE 'HWNBYC174\\_1O\\_%'")
+    expect(sql).not.toContain('regexp')
+    // 钉死 device → 等值
+    const pinned = tagIndexByFilterSql(config, '^HWNBYC174_1D_100620000015524')
+    expect(pinned).toContain("tagName = 'HWNBYC174_1D_100620000015524'")
+    // 非保守形态 → regexp 兜底
+    const fallback = tagIndexByFilterSql(config, '^HWNBYC.*_1H_')
+    expect(fallback).toContain("regexp(tagName, '^HWNBYC.*_1H_')")
   })
 
   it('timeSeriesByTagIndexSql: IN 子查询替代 JOIN', () => {
