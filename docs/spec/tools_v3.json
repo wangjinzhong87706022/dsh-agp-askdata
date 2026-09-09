@@ -1,0 +1,250 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "lookup_metric",
+      "description": "查询业务指标字典（指标名/类别/公式/采集点/评估周期）。当用户说业务指标相关的词时调用。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword":  {"type": "string", "description": "业务关键词，如'发电量'、'离散率'、'PR'"},
+          "category": {"type": "string", "description": "指标分类（electricity/dispatch/safety/maintenance 等）"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "lookup_entity",
+      "description": "查询实体字典（设备/资产/对象），支持 11 类基础模型（人机料法环 + IOT-ETL + 事件消息）。当用户说实体类词时调用。★ 增强：自动返回动态属性 → tagName 映射。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword":             {"type": "string", "description": "业务关键词"},
+          "entity_type":         {"type": "string", "description": "11 类基础模型之一（org/person/equipment/material/project/rule/document/environment/energy/iot/event）"},
+          "parent_id":           {"type": "string", "description": "上级实体 ID（树形查询）"},
+          "include_dynamic_attrs":{"type": "boolean", "default": true, "description": "是否包含动态属性 tagName 映射"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "lookup_tag",
+      "description": "查询时序点位字典 WT_TAG，反查业务名↔tagName 映射。当用户说指标但没说点位号时调用。★ tagName 四段式：[前缀]_tagCode_粒度段_device；粒度段首位=点类型(1=模拟量,2=状态量)，末位=粒度(O=原始,H/D/M/Y=小时/天/月/年派生)。tagCode 语义族：173/174=组串电流/日电量，zcdllsl/NBQDLLSD2=离散率族，QZXN1-58=全站指标族。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword":    {"type": "string", "description": "点位关键词（中文名/业务编码/注释）"},
+          "data_type":  {"type": "integer", "description": "0=整型/1=单精度/2=双精度/6=字符串"},
+          "granularity":{"type": "string", "description": "粒度代码：1O=模拟量原始/2O=状态量原始/1H/1D/1M/1Y=派生"}
+        },
+        "required": ["keyword"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "latest_value",
+      "description": "取一个或多个 tag 的最新实时值。优先走 TSDB HTTP RTDQuery 网关；兜底走 StarRocks max_by。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_names": {"type": "array", "items": {"type": "string"}, "description": "点位号列表（1-1000 个）"}
+        },
+        "required": ["tag_names"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "time_series",
+      "description": "时序明细查询，返回带时间桶的明细。走 SQL：WT_DATA JOIN WT_TAG。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_filter": {"type": "string", "description": "tagName 正则（必填）"},
+          "start_time": {"type": "string", "format": "date-time", "description": "起始时间"},
+          "end_time":   {"type": "string", "format": "date-time", "description": "结束时间"},
+          "bucket":     {"type": "string", "enum": ["raw","1m","5m","15m","1h","1d"], "default": "1h", "description": "分桶粒度，raw=原始"},
+          "limit":      {"type": "integer", "default": 1000, "minimum": 1, "maximum": 10000}
+        },
+        "required": ["tag_filter", "start_time", "end_time"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "aggregate",
+      "description": "时序聚合查询，SQL 端实现，支持 SUM/AVG/MAX/MIN/COUNT/STDDEV/VAR。支持按 device/tagcode/时间桶分组。★ 注意：group_by=device/tagcode 时 StarRocks 的 split(tagName,'_') 数组下标从 1 开始（[1]=tagCode、[3]=device），禁止 0 基下标。电量类派生点(_1H_/_1D_)重算可能叠加重复行，SUM/COUNT 前先去重（max_by(timestamp)）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_filter":      {"type": "string", "description": "tagName 正则（必填）"},
+          "start_time":      {"type": "string", "format": "date-time"},
+          "end_time":        {"type": "string", "format": "date-time"},
+          "func":            {"type": "string", "enum": ["SUM","AVG","MAX","MIN","COUNT","STDDEV","VAR"], "default": "SUM", "description": "聚合函数"},
+          "group_by":        {"type": "string", "enum": ["none","device","tagcode","bucket_hour","bucket_day","bucket_month"], "default": "none"},
+          "bucket_interval": {"type": "string", "enum": ["5m","15m","1h","1d"], "description": "分桶间隔（仅 group_by 含 bucket_ 时生效）"},
+          "limit":           {"type": "integer", "minimum": 1, "maximum": 10000}
+        },
+        "required": ["tag_filter", "start_time", "end_time", "func"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "aggregate_http",
+      "description": "调用 TSDB HTTP getAggregateHistory 接口，访问 18 种高级聚合算子（rms/percentile/skewness/kurtosis/stddeviation 等）。优先于 aggregate——服务端按压缩块聚合。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_names": {"type": "array", "items": {"type": "string"}, "description": "点位号列表"},
+          "start_time": {"type": "string", "format": "date-time"},
+          "end_time":   {"type": "string", "format": "date-time", "description": "与 sample 二选一"},
+          "sample":     {"type": "integer", "description": "采样个数（与 end_time 二选一）"},
+          "methods":    {"type": "array", "items": {"type": "string"}, "description": "聚合算子列表（max/min/rms/percentile50/skewness/...）"}
+        },
+        "required": ["tag_names", "methods"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "wide_history",
+      "description": "调用 TSDB HTTP getWideHistory 接口取宽表历史点，专门用于差值/累计增量计算（TSDB 服务端按 max-by-time - min-by-time 做最优，比 SQL 端聚合快 10 倍）。★ 精度口径：电量类测点多为阶跃属性（压缩偏差 compdev 推荐量程 0.1%~1%），差值精度上限由 compdev 决定，答案涉及'日电量与手抄差异'时注明。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_names":        {"type": "array", "items": {"type": "string"}, "description": "点位号列表"},
+          "start_time":        {"type": "string", "format": "date-time"},
+          "end_time":          {"type": "string", "format": "date-time"},
+          "interval_seconds":  {"type": "integer", "description": "采样间隔（秒），86400=每天/3600=每小时"}
+        },
+        "required": ["tag_names", "start_time", "end_time", "interval_seconds"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "business_metrics",
+      "description": "查询已由 xxl-job 离线任务计算好的业务事实表（低效组串/故障损失/限电损失/零电流/灰尘/离散率/PCS时段/采集完成率）。表名硬编码路由——禁止 LLM 自由选表，配置 system.business-tables map 决定哪些 metric_code 允许被查。★ 口径：逆变器状态统一查 WT_INVERTER_STATUS（status 1=停机 0=运行 3=零电流，type 1=华为 2=阳光），禁止从原始点位自算（厂家原始极性相反）；WT_CUBE.cubeType 权威枚举 1-20（7/8=逆变器电量值，9-12=组串离散率，13-16=逆变器离散率，17-20=储能四量）；限电损失=样板机外推法；低效组串=z-score≤-2；故障损失仅计 8-20 点、段>7200s 截断。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "metric_code":   {"type": "string", "description": "指标代码（项目字典定义的白名单值，如 HwStringILsl）"},
+          "start_time":    {"type": "string", "format": "date-time"},
+          "end_time":      {"type": "string", "format": "date-time"},
+          "entity_filter": {"type": "string", "description": "实体过滤（设备 ID，可选）"}
+        },
+        "required": ["metric_code", "start_time", "end_time"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "execute_wt_select",
+      "description": "★ v3 核心 Tool：通过 AGP 平台 /wtSelect 接口执行 WT Select 中文查询。强制使用中文模型名/属性名（如 SELECT 姓名 FROM 钛能职工模型 WHERE 部门='设计部'），AGP 后端自动翻译成物理 SQL。★ 禁止直接拼裸 SQL。★ 校验层强制：白名单表/字段、禁 DML/DDL、行级权限注入。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "wt_sql": {"type": "string", "description": "WT Select 完整 SQL（必须用中文模型名/属性名/条件）"},
+          "params": {"type": "object", "description": "参数化绑定 Map（可选）"}
+        },
+        "required": ["wt_sql"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "query_kg",
+      "description": "查询知识图谱。★ v3 增强：AGP 实体模型有 6 种关系（继承 is-a / 关联 use-a / 聚合 has-a / 组合 contains-a / 依赖 depends-on / 实现 realize），关系类型可过滤。支持实体查询（entity_id + max_hop）或类 Cypher 查询。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity_id":       {"type": "string", "description": "实体 ID（与 cypher 二选一）"},
+          "relation_types":  {"type": "array", "items": {"type": "string", "enum": ["is-a","use-a","has-a","contains-a","depends-on","realize"]}, "description": "6 种关系类型过滤"},
+          "max_hop":         {"type": "integer", "default": 2, "minimum": 1, "maximum": 5},
+          "cypher":          {"type": "string", "description": "类 Cypher 查询（与 entity_id 二选一）"},
+          "limit":           {"type": "integer", "default": 50, "minimum": 1, "maximum": 1000}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_knowledge",
+      "description": "RAG 知识检索（KB-01 ~ KB-06 知识库），调用 RAGFlow MCP（端口 9382）。返回结果带 source_id/page/chunk_id 引用溯源。★ RAGFlow 仅暴露只读检索——Agent 不具备修改知识库的能力（安全边界）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query":      {"type": "string", "description": "自然语言查询"},
+          "kb_type":    {"type": "string", "enum": ["KB-01","KB-02","KB-03","KB-04","KB-05","KB-06"], "description": "6 类知识库"},
+          "dataset_ids":{"type": "array", "items": {"type": "string"}, "description": "数据集 ID 白名单（运维配置）"},
+          "top_k":      {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
+          "mode":       {"type": "string", "enum": ["hybrid","vector","keyword"], "default": "hybrid"}
+        },
+        "required": ["query", "kb_type"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "evaluate_rules",
+      "description": "★ 智能体平台'水利红线' Tool：业务规则试算。涉及'是否触发'、'判定'、'阈值'等业务判定时必须先调用此 Tool，禁止 LLM 自由生成判定结论。输入事实数据（facts），返回命中的规则编号与执行动作。调用 DSH 规则引擎服务。★ 首批规则源（两个细则）：AGC 可用率≥99%、10min 变化≤装机33%、短期预测光伏偏差≤20%(96点,权重D-1/2/3=6:3:1)、超短期调和平均 85/80/75/70%、上传率>95%；大发时段 11:00-17:00、高峰 7-10/18-23 点；免考核：出力受限自动免考、临修新能源 48h/月、新场站 3 个月免考期。光伏判据：热斑=温差>20℃(红外为准)、离散率四级 ≤5%/≤10%/≤20%/>20%。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "facts":          {"type": "object", "description": "事实数据，如 {water_level: 32.5, inflow: 1200, season: 'main_flood'}"},
+          "category":       {"type": "string", "enum": ["flood_dispatch","emergency_response","maintenance","threshold","judgment"], "description": "规则分类"},
+          "return_actions": {"type": "boolean", "default": true, "description": "是否返回触发动作"}
+        },
+        "required": ["facts", "category"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "skill",
+      "description": "调用一个 Skill（场景化能力包，封装多 Tool + 触发条件 + 提示词模板）。智能问数主入口——业务问题通常先识别 Skill，再让 Skill 调度底层 Tool。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill_id":  {"type": "string", "description": "Skill ID（项目字典定义，如 intelligent_query / water_dispatch）"},
+          "inputs":    {"type": "object", "description": "Skill 输入参数 Map"},
+          "sub_agent": {"type": "string", "description": "可选：调用子 Agent"}
+        },
+        "required": ["skill_id", "inputs"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "estimate_count",
+      "description": "估算某时间区间内查询会扫描的记录数，作为安全护栏。超过 system.max-scan-rows（默认 1 亿）拒绝返回明细。所有大查询（time_series / aggregate / execute_wt_select）前必须先调此 Tool。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tag_filter": {"type": "string", "description": "tagName 正则（与目标查询一致）"},
+          "start_time": {"type": "string", "format": "date-time"},
+          "end_time":   {"type": "string", "format": "date-time"}
+        },
+        "required": ["tag_filter", "start_time", "end_time"]
+      }
+    }
+  }
+]

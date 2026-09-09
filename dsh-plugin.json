@@ -1,0 +1,46 @@
+{
+  "$schema": "https://dsh.community/schemas/dsh-plugin-0.15.json",
+  "manifestVersion": "0.15",
+  "id": "io.github.wisetao.dsh-agp-askdata",
+  "name": "AGP AskData",
+  "version": "0.1.0",
+  "facets": {
+    "host": {
+      "entry": "lib/dsh/plugin.js",
+      "apiVersion": "v1alpha1"
+    }
+  },
+  "requires": {
+    "contracts": [
+      {
+        "apiVersion": "commands.dsh/v1alpha1",
+        "kind": "Command",
+        "optional": true
+      }
+    ],
+    "services": []
+  },
+  "permissions": [
+    {
+      "name": "subprocess.spawn",
+      "scope": "io.github.wisetao.dsh-agp-askdata",
+      "reason": "execute the mysql CLI client against StarRocks (MySQL protocol) for templated TSDB queries"
+    }
+  ],
+  "contributes": {
+    "commands": [],
+    "panels": []
+  },
+  "subscriptions": [],
+  "license": "MIT",
+  "source": {
+    "repository": "https://git.example.com/wisetao/dsh-agp-askdata"
+  },
+  "overrides": [
+    {
+      "target": "database-clients",
+      "kind": "native",
+      "description": "StarRocks access runs through the external mysql CLI client; the plugin never embeds database credentials in argv"
+    }
+  ]
+}

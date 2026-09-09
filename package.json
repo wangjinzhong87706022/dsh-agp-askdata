@@ -1,0 +1,47 @@
+{
+  "name": "dsh-agp-askdata",
+  "version": "0.1.0",
+  "description": "AGP TSDB/Database 智能问数 DSH 插件：模板化 SQL Tool + 白名单校验 + 扫描护栏 + 哈希链审计（P0：StarRocks TSDB）",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "main": "./lib/dsh/plugin.js",
+  "exports": {
+    ".": "./lib/dsh/plugin.js",
+    "./tools": "./lib/dsh/tools.js",
+    "./service": "./lib/index.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsdown"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.13",
+    "tsdown": "^0.15.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.3",
+    "schemastery": "^3.18.0"
+  }
+}

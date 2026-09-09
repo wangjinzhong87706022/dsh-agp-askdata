@@ -1,0 +1,26 @@
+# The dsh-agp-askdata bundle patch: activates the plugin as a profile layer.
+#
+# P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
+# tools (11 in total). The `askdata` row mounts the plugin service (config,
+# clients, validation gate, audit chain). The `askdata-routes` web row and the
+# TSDB HTTP gateway tools join in P2.
+#
+# NOTE: the connection values below are DEV-ONLY (内网联调环境 root 空密码)。
+# 生产部署必须改为只读账号；凭据不落盘、不进日志（AGENTS.md 红线）。
+- insert:
+    - id: askdata
+      name: 'dsh-agp-askdata'
+      config:
+        connection:
+          host: '192.168.101.54'
+          port: 9030
+          user: 'root'
+          password: ''
+          database: 'WT_DB'
+          driver: 'mysql2'
+        mysqlConnection:
+          host: '192.168.101.54'
+          port: 3306
+          user: 'root'
+          password: 'Aa123456.'
+          database: 'wisetao_meta'

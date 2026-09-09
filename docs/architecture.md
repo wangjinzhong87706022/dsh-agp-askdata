@@ -1,0 +1,626 @@
+# dsh-agp-askdata 架构设计
+
+AGP TSDB / Database 智能问数的 DSH 插件。本文是实现的共同基线；上游需求与规格来自 WISETao 设计文档（`docs/spec/`，源目录 `D:\svn\WISETao_custom_demo\docs`）。
+
+## 1. 定位与范围
+
+**定位**：在 DSH（DeepSeek Harness，"一切皆插件"的 LLM 调度层）上，为 AGP 光伏平台提供合规的智能问数能力。业务人员用自然语言提问，系统经由**固定语义的模板化 Tool** 查询 StarRocks TSDB 与业务库，返回带字段元数据的结构化结果与审计记录。
+
+**安全红线（来自 0824/0903 会议纪要，不可妥协）**：
+
+1. AI 不能直接拼裸 SQL——一切取数走封装 Tool；
+2. 数据源必须限制在基础库白名单内；
+3. 机理判定强制走 `evaluate_rules`，禁止 LLM 自由生成结论（P2）；
+4. DML 拦截率 100%；
+5. 每个回答强制溯源 ≥2 条引用（P2）。
+
+**阶段路线**：
+
+| 阶段 | 交付 | 状态 |
+| --- | --- | --- |
+| P0 | StarRocks TSDB 面：`lookup_tag` / `estimate_count` / `latest_value`(兜底路) / `time_series` / `aggregate` + 校验层 + 扫描护栏 + 审计链 | ✅ 已实现并在真实库验证（§13） |
+| P1 | **DSH 接线（✅ 本节）**：cordis 宿主行 + 工具行 + preset 挂载；**11 工具已接线**（P0 五 + P1 六，§14.2）。TSDB HTTP 网关、WT Select、HTML 报告待接 | 基本完成（P1 六工具待真实 MySQL 联调，见 §15） |
+| P2 | `evaluate_rules` 强制路由、四级权限 + 字段权限、哈希链审计落库、强制溯源 | 未开始 |
+| P3 | `search_knowledge`（RAGFlow）、`query_kg`、`skill` 场景编排 | 未开始（RAGFlow 先用 DSH MCP 桥直连，独立能力插件另立决策见 §9） |
+
+## 2. 全局架构
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                        DSH (车架子)                          │
+│   agent-loop · 会话 · 审批/sandbox · 工具注册 · preset       │
+└───────────────▲────────────────────────────────────────────┘
+                │ 工具调用（P0 后为直接注册；P1 走 patch+preset）
+┌───────────────┴────────────────────────────────────────────┐
+│                   dsh-agp-askdata 插件                       │
+│                                                            │
+│  工具面 tools/         校验层 sql/whitelist    审计 audit.ts │
+│  ├ lookup_tag    ──►  只读分类+白名单闸门  ──►  WT_QUERY_AUDIT│
+│  ├ estimate_count     (DML/敏感表/多语句)      (哈希链, P0尽力) │
+│  ├ latest_value                                            │
+│  ├ time_series        模板层 sql/templates                  │
+│  └ aggregate          (三件套: LEFT JOIN + ^regexp          │
+│                        + bitand(quality,128)!=128)          │
+└───────────────┬────────────────────────────────────────────┘
+                │ mysql CLI（MYSQL_PWD 环境变量注入，凭据不进 argv）
+┌───────────────▼────────────────────────────────────────────┐
+│              StarRocks FE (MySQL 协议, :9030)                │
+│   WT_TAG(测点字典)   WT_DATA(时序主表)   [P1+] WT_CUBE 等事实表 │
+└────────────────────────────────────────────────────────────┘
+   P1+: TSDB HTTP 网关(RTDQuery/getAggregateHistory/getWideHistory)
+        AGP /wtSelect 接口 · RAGFlow MCP(:9382) · xxl-job 事实表
+```
+
+## 3. P0 工具面
+
+| Tool | 层级 | 语义 | 后端 |
+| --- | --- | --- | --- |
+| `lookup_tag` | metadata | WT_TAG 字典反查（业务名 ↔ tagName） | StarRocks SQL |
+| `estimate_count` | metadata | 区间扫描行数估算，超 `maxScanRows`（默认 1 亿）拒绝 | StarRocks `COUNT(*)` |
+| `latest_value` | metadata | 一批 tag 最新值；先存在性预检，全缺失 → `TAG_NOT_FOUND` | P0: `max_by` 兜底路；P1: TSDB HTTP RTDQuery 主路 |
+| `time_series` | base_business | 时序明细 / 时间桶（raw/1m/5m/15m/1h/1d） | StarRocks `time_slice` / `date_trunc` |
+| `aggregate` | base_business | SUM/AVG/MAX/MIN/COUNT/STDDEV/VAR × 分组（none/device/tagcode/桶） | StarRocks |
+
+调用顺序约定（写入 preset persona）：字典 → 护栏 → 取数。
+
+## 4. 安全模型（红线 → 机制）
+
+| 红线 | P0 机制 | 落点 |
+| --- | --- | --- |
+| 禁裸 SQL | LLM 只能调 Tool；Tool 入参经 `sql/validate.ts` 校验后进模板；无任何"执行用户 SQL"工具 | `tools/`、`src/sql/templates.ts` |
+| 只读 | `classifyStatement` + 派发前 `assertSafeToExecute` 闸门；`security.readOnly` 配置在 P0 恒为 true（关闭即配置错误）。**闸门在服务执行器咽喉点统一收口（`src/index.ts` gate）**，工具层调用点的闸门为纵深防御 | `src/sql/whitelist.ts`、`src/index.ts` |
+| 基础库白名单 | `extractTables` 提取 FROM/JOIN 表名，逐一命中 `security.tableWhitelist`，否则 `SENSITIVE_TABLE` | 同上 |
+| 扫描护栏 | 区间查询前强制 `estimate_count`（`security.scanGuard`，默认开），超限 → `EXCEED_LIMIT`；`aggregate` 命中 WT_CUBE 路由时跳过（实际扫描的是预聚合表，非 WT_DATA 大区间） | `tools/time-series.ts`、`tools/aggregate.ts` |
+| 质量过滤 | 所有时序 SQL 强制 `bitand(quality, 128) != 128`（掩码可配）；`decodeQuality` 供答案解释 | `src/sql/quality.ts` |
+| 审计 | 每次调用（成功/失败）构建 `WT_QUERY_AUDIT` 行，`result_hash=SHA256(sql‖result)`，`prev_hash` 链式；**P0/P1 链仅在进程内维护**（行构建 + 宿主闭包游标），落库为 P2（需旁路写账号）；审计失败不阻断查询。`insertAuditSql` 是规格要求的 INSERT 模板，仅供旁路写通道使用，绝不进入取数面 | `src/audit.ts`、`tools/types.ts` |
+
+输入校验（《规范》§1.1）：ISO8601 时间（start<end、≤365 天）、过滤串 ≤1024 且禁 `;`/`--`/`/*`、tagName 数组 1-1000 去重、limit 1-10000。
+
+## 5. 执行层选型
+
+**双通道，默认 mysql2 驱动直连**（`src/clients/starrocks-mysql2.ts`，`connection.driver: 'mysql2' | 'cli'`）：
+
+- **mysql2（默认）**：StarRocks 兼容 MySQL 线协议，驱动直连 FE 查询端口（默认 9030）。刻意使用 text protocol（`conn.query()` 而非 `conn.execute()`）规避 StarRocks 服务端 prepared statement 的版本差异；`dateStrings: true` 让 datetime 以字符串返回，与 AGP fields 契约一致；错误按 `code`/`sqlState` 映射为 `BACKEND_DOWN` / `WT_SQL_PARSE_ERROR`。P0 每查询独立建连，连接池是 P1 优化项。
+- **cli（回落）**：外部 `mysql` 客户端，密码经 `MYSQL_PWD` 环境变量注入（不进 argv/日志）。适用场景：目标环境不允许出站驱动连接之外的依赖安装、或需要与其他 dsh-data-agent 类插件的通路保持同构（其 Doris 类型即 `MYSQL_COMMON_ARGS` + mysql CLI，已验证该协议通路）。
+
+两通道共享同一 `SqlExecutor` 接口（`execute(sql) → {columns, rows}`），工具层与模板层完全无感；凭据约定一致：密码只在进程内传给驱动或环境变量，不进日志、错误消息与测试快照。
+
+tagName 四段式在 SQL 侧统一使用 StarRocks **1 基** `split(tagName,'_')[n]`（`[1]`=tagCode、`[3]`=device，禁止 0 基）；JS 侧 `parseTagName` 仅用于解释。
+
+## 6. AGP 返回契约
+
+`ToolResult`（《规范》§1.2）：`success / toolName / apiOrSql / params / fields / data / rowCount / executionMs / auditId / citations / errorMessage / errorCode / page`。`fields`+`data` 供前端直接渲染；`citations` P0 恒空，P2 强制 ≥2 条。
+
+错误码（《规范》§1.4）：`INVALID_PARAM / PERMISSION_DENIED / SENSITIVE_TABLE / DML_FORBIDDEN / EXCEED_LIMIT / BACKEND_DOWN / WT_SQL_PARSE_ERROR / TAG_NOT_FOUND`，每个码带 LLM 处置提示（`src/errors.ts`）。
+
+## 7. 配置参考
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `connection.{host,port,user,password,database}` | — | StarRocks FE；密码进程内使用，不落盘 |
+| `connection.driver` | `mysql2` | 执行通道：`mysql2` 驱动直连 / `cli` 外部 mysql 客户端 |
+| `connection.cliPath` | `mysql` | 仅 `driver: 'cli'` 时使用；SQL 经 stdin 送达，不进 argv |
+| `mysqlConnection.{host,port,user,password,database}` | 空 | MySQL 业务库；留空则 P0 面可用、P1 元数据/告警工具在调用期报 `BACKEND_DOWN` |
+| `tables.{tag,data}` | `WT_TAG` / `WT_DATA` | 表名可按部署覆盖 |
+| `system.maxScanRows` | 1 亿 | 扫描护栏阈值 |
+| `system.maxTimeRangeDays` | 365 | 单次查询时间跨度上限 |
+| `system.badValueMask` | 128 | 质量位坏值掩码 |
+| `system.queryTimeoutMs` | 15000 | 单条 SQL 超时 |
+| `system.maxLimit` | 10000 | 返回行数上限 |
+| `system.defaultLimit` | 1000 | 时序/聚合工具默认返回行数 |
+| `system.defaultLookupLimit` | 100 | 字典/设备反查工具默认返回行数 |
+| `system.defaultAlarmLimit` | 100 | 告警工具默认返回行数 |
+| `system.timeZone` | `+08:00` | 时间字面量统一按 ±HH:MM 偏移换算为墙钟（非法格式在加载期报错；CLI 通道另以 init-command 设置会话时区） |
+| `security.tableWhitelist` | `['WT_TAG','WT_DATA','WT_CUBE','WT_DEVICE']` | 基础库白名单 |
+| `security.mysqlTableWhitelist` | `['wisetao_meta.meta_class_info', …]` | MySQL 白名单（跨库全限定格式） |
+| `security.scanGuard` | true | 区间查询前强制估算 |
+| `audit.{enabled,table,userId,appId,orgId}` | false / `WT_QUERY_AUDIT` | 审计开关与身份 |
+
+## 8. DSH 接线（P1，已实现）
+
+工程骨架遵循 DSH 插件约定（对齐 dsh-data-agent 的双行模式）：
+
+**宿主行 `dsh-agp-askdata`**（`src/dsh/plugin.ts`，包主入口）：
+
+- `Config`（schemastery）：`connection`（host/port 必填，driver 默认 mysql2）、`tables`、`system`、`security`、`audit`、`installPreset`、`presetId`——loader 应用默认值后交 `resolveConfig` 二次校验，配置错误在加载期失败；
+- `apply()`：`createAskdataService` 装配 → `ctx.provide('askdata', service)`（声明合并进 cordis Context）→ `installPreset`；
+- `installPreset`：拷贝 `preset/askdata/` 到 `$DSH_HOME/.agent-presets/askdata/`，幂等（目标存在即跳过，绝不覆盖用户改动），失败仅告警不阻断启动。
+
+**工具行 `dsh-agp-askdata/tools`**（`src/dsh/tools.ts`，`inject = ['tools', 'askdata']`）：
+
+- 由 `preset/askdata/agent.cordis.yml` 挂载（同 `dsh-tool-str-replace-editor` 的 preset 行模式），只消费宿主服务，满足 preset 守卫；headless 组合不挂本行、无工具副作用；
+- 每个框架无关 `AskdataTool` 经 `adaptAskdataTool`（`src/dsh/adapter.ts`）转为 DSH 工具定义：parameters/output.schema 为 JSON Schema（required 提升、additionalProperties:false）、`execute` 抛错即失败（携带规范错误码）、`output.render` 输出 fields+前 20 行预览、presentCall/presentResult 用 generic 卡片；
+- 取消信号（`exec.signal`）与审计哈希链游标（prev_hash 闭包）逐调用注入工具上下文；执行层（mysql2/cli 双通道）收到中止立即销毁连接/杀进程。
+
+**与 dsh-tools 的关系**：工具定义不经由 `@deepseek-ai/dsh-tools` 的 `defineTool`——其 npm RC 依赖链（`dsh-type-meta`）暂不可安装；适配器直接产出 `ToolDefinition` 形状（以 harness `packages/core/tools` 为准），`ctx.tools` 用结构化视图桥接、不做模块声明合并。dsh-tools 可安装后可替换获得宿主级参数校验。
+
+**安装（目标机器）**：`pnpm run build` 后把本包链入 DSH 的插件解析路径（npm link 或安装包），DSH 加载 `cordis.patch.yml` 的 `askdata` 行；Web/TUI 选"AGP问数" preset 即得五工具。
+
+### 8.1 取消语义
+
+`SqlExecutor.execute(sql, { signal })` 贯穿三层：runSqlTool 预检 aborted → mysql2 通道 abort 即 `conn.destroy()` → CLI 通道 abort 即 SIGKILL 子进程；超时与取消共用同一销毁路径。
+
+## 9. RAGFlow 整合（P3 前置决策）
+
+检索是可复用能力，不并入本插件：先以 DSH MCP 桥直连 RAGFlow MCP（:9382，零代码）验证；当需要 KB-01~06 路由、溯源规范化（source_id/page/chunk_id → ≥2 引用）、知识库权限过滤时，另立 `dsh-ragflow-kb` 能力插件，本插件的 `search_knowledge` 作为 Consumer 调用。
+
+## 10. 目录结构
+
+```
+src/            服务核心（sql 校验/模板/白名单、执行层、审计；适配器在 src/dsh）
+  dsh/plugin.ts    宿主行：schemastery Config + 服务装配 + preset 安装（包主入口）
+  dsh/tools.ts     工具行：AskdataTool → DSH 工具注册（由 preset 挂载）
+  dsh/adapter.ts   AskdataTool → ToolDefinition 适配（JSON Schema/render/取消信号）
+  clients/         mysql2（默认）/ mysql CLI（回落）双通道执行器
+tools/          P0 工具面（框架无关 AskdataTool）
+preset/askdata/   "AGP问数" preset（persona 约束 + askdata-tools 行）
+scripts/          smoke.mjs（连通）· e2e-p0.ts（工具链）· ask-smoke.ts（LLM 问数）
+docs/spec/      上游 WISETao 规格副本（源：D:\svn\WISETao_custom_demo\docs）
+tests/          vitest：校验层/四段式/质量位/模板金样/TSV 解析/审计链/工具行为/DSH 适配器
+```
+
+## 11. 测试策略
+
+纯函数穷举（校验、转义、分类、解码）+ 模板金样断言 + **每个模板产物必须通过白名单闸门**（守卫生成面与闸门面的同步）+ 工具行为测试（内存执行器：TAG_NOT_FOUND、EXCEED_LIMIT 不触达主查询、审计链 prev_hash 衔接）。真实 StarRocks 连通性测试属 e2e（需环境），不在单测范围。
+
+## 12. 开放问题
+
+- **estimate 精度**：P0 用谓词内 `COUNT(*)`（StarRocks 列存下可接受）；若大区间估算本身成为瓶颈，切 `SHOW DATA`/元数据近似，接口不变。
+- **时区**：会话级 `init-command SET time_zone`，写入侧若为本地时区裸时间需在 P1 与 AGP 采集侧对齐口径。
+- **TSDB HTTP 网关**：`latest_value` 主路、`aggregate_http`、`wide_history` 依赖网关地址与鉴权参数，等实施前置资料确认后接入（见《实施前置资料清单》）。
+- **WT_QUERY_AUDIT 写权限**：问数账号需要对该表的 INSERT 权限；只读账号部署时审计改由旁路账号写入。
+
+## 13. 验证记录（2026-09-07，真实环境）
+
+### 13.1 环境与数据画像
+
+StarRocks **3.1.9**（单 FE），`root@192.168.101.54:9030`（MySQL 协议，mysql2 驱动直连，空密码）。库 `WT_DB`：`WT_TAG` 测点字典 + `WT_DATA` 时序主表，真实光伏数据——35kV 开关柜状态量（`35KV1SEG0007_2O_100620000005171`"35KVI段装置告警"等），设备号 `100620000005171`，数据止于 **2024-08-14**，密度约 **4 亿行/天**。`WT_QUERY_AUDIT` 未建（审计默认关闭）。
+
+### 13.2 工具链 e2e（scripts/e2e-p0.ts，1 小时窗口）
+
+| 工具 | 结果 | 耗时 | 备注 |
+| --- | --- | --- | --- |
+| lookup_tag | ✓ | 165ms | 业务名反查命中 |
+| estimate_count | ✓ | 1.7s | 2016 万行/小时窗口 |
+| latest_value | ✓ | 2.0s | `max_by` 兜底路返回真实最新值 |
+| time_series | ✓ | 6.1s | 5m 桶真实数据 |
+| aggregate | ✓ | 6.4s | device 分组（1 基 split[3]） |
+
+**护栏实测**：1 天窗口估算 3.99 亿行 > 1 亿上限，`time_series`/`aggregate` 正确拒绝并返回 `EXCEED_LIMIT`；查询超时自管定时器在 15s 档精确切断（15226ms 实测）。
+
+### 13.3 e2e 逼出的缺陷与修复（均已带回归测试）
+
+1. **`maxValue` 撞保留字**：MySQL 系保留字 `MAXVALUE` 使 `AS maxValue` 语法报错 → 全部列别名加反引号，GROUP/ORDER BY 用表达式不用别名。
+2. **ISO 字面量破坏分区裁剪**：`'…T….…Z'` 原文使 `COUNT` 全表扫 182s → `toSqlTimestamp` 统一规范化为 `'YYYY-MM-DD HH:MM:SS'`（按 `system.timeZone` 偏移换算）。
+3. **mysql2 `timeout` 选项不可靠**：182s 未触发 → 适配器自管定时器 + `conn.destroy()`。
+4. **FE planner 瞬态超时**（memo 阶段 >3s，"Hive external table fetch metadata"提示）→ 对 `/planner use long time|memo phase/i` 自动重试一次，重试后 46ms 成功。
+
+### 13.4 智能问数冒烟（scripts/ask-smoke.ts）
+
+形态：DeepSeek 兼容端点（`DEEPSEEK_BASE_URL` 中转，`LLM_MODEL=glm-5.3`）+ function calling；LLM 只暴露 P0 五工具，**无任何 SQL 工具**；系统提示词即 `preset/askdata` 的硬性约束。
+
+- **问 1**"35KVI段装置告警这个测点最新的值是多少？"：7 次工具调用。字典查出**两个同名测点**（0007/0914）→ `latest_value` 双测点超时 → **LLM 自主降级**：estimate 锚定窗口后改用 `time_series` raw 兜底 → 结论含两测点全名、值、质量码，并提示数据止于 2024-08-14。
+- **问 2**"2024-08-14 全天 35KVI段开入13 的趋势？"：9 次调用。全天窗口触发 `EXCEED_LIMIT` → **LLM 自行切 6h 段**，撞边界的段再切 3h → 汇总 19 条记录恒为 0，识别"定时快照+变位记录"模式并指出 18:13 后数据缺口。
+
+成本约 2 万 token/问。结论均引用测点全名与时间范围（提示词约束，非机制强制——强制溯源在 P2）。
+
+### 13.5 遗留观察（转后续优化）
+
+- `latest_value` 双测点计划不稳定（单点 2s / 双点曾 30s+），P1 接 TSDB HTTP RTDQuery 主路后退居兜底。
+- 扫描护栏为**全表口径**（不含 tag 过滤），单测点全天查询也会被拦、靠 LLM 切窗——符合规范保守取值，P1 可评估按 tagIndex 估算的细化口径。
+- 现以 root 空密码验证连通；生产前必须建只读账号并撤权（P1 部署清单项）。
+
+## 14. P1 扩展架构决策（2026-09-08，基于 §一~§十六 素材）
+
+> **素材基线**：`docs/spec/光伏深度分析-WT_TAG与TSDB查询大全.md` §一~§十六，含 295 模型清单、11 WT-SQL 方案、15 StarRocks 表、205 万测点分布、11489 行告警、设备树 6 层拓扑、华为逆变器四层查询实证。
+
+### 14.1 决策汇总
+
+| # | 决策点 | 选定方案 | 否决方案 |
+|---|---|---|---|
+| D1 | P1 新增工具 | 6 个：lookup_model / lookup_object / lookup_tag_definition / resolve_tag / query_alarm / query_alarm_config | 全量扩展（不加 aggregate_cube，P2 再考虑） |
+| D2 | 中文→测点映射 | 一个 resolve_tag 工具（中文设备名+中文测点名+粒度→tagName+tagIndex） | 拆两步（LLM 易拼错）/ 复用 lookup_tag LIKE（精度差） |
+| D3 | WT_DATA 查询优化 | 改 time_series/aggregate 内部：先查 WT_TAG→tagIndex，再用 tagIndex 过滤 WT_DATA；aggregate 自动路由 WT_CUBE | 加新工具（接口重复）/ 暂不优化 |
+| D4 | MySQL 通道 | 复用 mysql2 + Config 加 mysqlConnection 字段 + 新增 mysqlExecutor | 独立执行器（改动大） |
+| D5 | 模型过滤 | Config 加 appId=10062，元数据查询强制过滤 | LLM 自选（易查到 260 个无关模型） |
+
+### 14.2 P1 工具面（扩展后 11 工具 = P0 五 + P1 六）
+
+| Tool | 层级 | 语义 | 后端 | 新增 |
+|---|---|---|---|---|
+| `lookup_tag` | metadata | WT_TAG 字典反查 | StarRocks | P0 |
+| `estimate_count` | metadata | 区间扫描行数估算 | StarRocks | P0 |
+| `latest_value` | metadata | 一批 tag 最新值 | StarRocks | P0 |
+| `time_series` | base_business | 时序明细/时间桶 | StarRocks（**内部改 tagIndex 过滤**） | P0（P1 优化） |
+| `aggregate` | base_business | 聚合×分组 | StarRocks（**内部路由 WT_CUBE**） | P0（P1 优化） |
+| `lookup_model` | metadata | 模型清单（meta_class_info，app_id 过滤） | MySQL | **P1** |
+| `lookup_object` | metadata | 设备查询（wt_elm_equipment，按 class__path/node_name/parent_id） | MySQL | **P1** |
+| `lookup_tag_definition` | metadata | 动态属性定义（meta_classtagmodel，tagCode+中文名+类型） | MySQL | **P1** |
+| `resolve_tag` | metadata | **中文→tagName 映射链**（设备名+测点名+粒度→tagName+tagIndex） | MySQL+StarRocks | **P1** |
+| `query_alarm` | base_business | 告警记录（wt_bas_alarmrecord，按时间/级别/设备/测点） | MySQL | **P1** |
+| `query_alarm_config` | metadata | 告警配置（bole.wt_cus_alarmdynamicconfig，按设备类/测点） | MySQL | **P1** |
+
+### 14.3 resolve_tag 工具规格（中文→测点映射链）
+
+```
+输入：
+  deviceName: string   // 中文设备名，如"1号箱变1号逆变器"
+  tagNameCn: string    // 中文测点名（必须严格等于 meta_classtagmodel.name），如"总发电量"
+  granularity: enum    // 粒度：1O(原始) / 2O(状态量) / 1H(时) / 1D(日) / 1M(月) / 1Y(年)
+
+内部链路（5 步，2026-09-09 真实库全链路验收通过 §16）：
+  1. MySQL wisetao_meta.wt_elm_equipment WHERE node_name=? AND deleted=0 → id, class__path
+  2. MySQL wisetao_meta.meta_classtagmodel WHERE name=? AND master_class_id=(SELECT id FROM meta_class_info WHERE class_path=step1.class__path) → tag_code
+  3. 拼 tagName = `${tagCode}_${granularity}_${deviceId}`（规格顺序：tagCode_粒度_deviceId；
+     WT_TAG 实测样例 HWNBYC174_1D_100620000015524）
+  4. MySQL wisetao_meta.wt_iot_tags WHERE tagname=? AND deleted=0 → 确认存在 + alias
+  5. StarRocks WT_DB.WT_TAG WHERE tagName=? → tagIndex
+
+输出：
+  tagName: string      // 如"HWNBYC174_1D_100620000015521"
+  tagIndex: number     // 如1961441（WT_TAG 实测值）
+  alias: string        // 如"总发电量日统计测点"
+  deviceId: number     // 如100620000015521
+  tagCode: string      // 如"HWNBYC174"
+
+错误码：
+  OBJECT_NOT_FOUND（step1 未命中设备名）
+  TAG_DEFINITION_NOT_FOUND（step2 未命中测点名；可能原因：① 中文名未与 meta_classtagmodel.name 严格相等
+                            → 先 lookup_tag_definition；② 测点定义不在该设备 class__path 下）
+  TAG_NOT_REGISTERED（step4 tagName 在 wt_iot_tags 不存在；可能原因：tagCode 与 deviceId 隶属关系不一致）
+  TAG_NOT_IN_TSDB（step5 tagName 在 WT_TAG 不存在）
+```
+
+### 14.4 time_series / aggregate 内部优化（D3）
+
+**time_series 优化**（对 LLM 接口不变）：
+```
+当前：SELECT ... FROM WT_DATA WHERE tagName IN (...) ...
+优化后：
+  1. SELECT tagName, tagIndex FROM WT_TAG WHERE tagName IN (...)  -- 一次批量查
+  2. SELECT ... FROM WT_DATA WHERE tagIndex IN (...) ...          -- int 过滤比 varchar 快
+```
+
+**aggregate 自动路由**（对 LLM 接口不变）：
+```
+当聚合类型 ∈ {SUM, AVG, MAX, MIN, COUNT} 且分组维度 ∈ {device, tagcode, none} 且时间粒度 ∈ {1H, 1D, 1M, 1Y}：
+  → 路由到 WT_CUBE（2553 万行，预聚合，含 value/avgValue/maxValue1/minValue1/sumValue/countValue）
+否则：
+  → 回退到 WT_DATA 全聚合（带扫描护栏）
+```
+
+### 14.5 Config 扩展（D4 + D5）
+
+```yaml
+# 新增字段
+mysqlConnection:       # MySQL 业务库连接（元数据 + 告警 + 配置）
+  host: '192.168.101.54'
+  port: 3306
+  user: 'root'
+  password: ''         # 进程内使用，不落盘
+  database: 'wisetao_meta'  # 默认元数据库；告警配置查 bole 库时跨库引用
+appId: 10062           # 光伏应用 ID（D5 模型过滤）
+
+# 安全白名单扩展
+security:
+  tableWhitelist:      # StarRocks 白名单（已有）
+    - 'WT_TAG'
+    - 'WT_DATA'
+    - 'WT_CUBE'        # 新增
+    - 'WT_DEVICE'      # 新增
+  mysqlTableWhitelist: # MySQL 白名单（新增）
+    - 'wisetao_meta.meta_class_info'
+    - 'wisetao_meta.meta_classtagmodel'
+    - 'wisetao_meta.meta_class_link_info'
+    - 'wisetao_meta.wt_elm_equipment'
+    - 'wisetao_meta.wt_iot_tags'
+    - 'wisetao_meta.wt_bas_alarmrecord'
+    - 'bole.wt_cus_alarmdynamicconfig'
+```
+
+### 14.6 数据通道架构（扩展后）
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                   dsh-agp-askdata 插件                       │
+│                                                            │
+│  工具面 tools/（11 = P0 五 + P1 六）                        │
+│  ├ lookup_tag ──────────────────────────────────────────────│
+│  ├ estimate_count ─────────────────────────────────────────│
+│  ├ latest_value ───────────────────────────────────────────│
+│  ├ time_series ──► (P1: 先查 WT_TAG→tagIndex) ─────────────│
+│  ├ aggregate ────► (P1: 自动路由 WT_CUBE) ─────────────────│
+│  ├ lookup_model ──┐                                        │
+│  ├ lookup_object ─┤                                        │
+│  ├ lookup_tag_def �┤──► mysqlExecutor ──► MySQL 3306       │
+│  ├ resolve_tag ───┤    (wisetao_meta + bole)               │
+│  ├ query_alarm ───┤                                        │
+│  └ query_alarm_cfg┘                                        │
+│                                                            │
+│  执行层 clients/                                           │
+│  ├ starrocks-mysql2.ts (已有) ──► StarRocks 9030 (WT_DB)  │
+│  └ mysql-mysql2.ts (新增) ─────► MySQL 3306 (业务库)      │
+│                                                            │
+│  校验层 sql/whitelist.ts (扩展：双白名单)                   │
+│  模板层 sql/templates.ts (扩展：6 个 MySQL 模板)            │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 14.7 新增 MySQL 模板（sql/templates.ts 扩展）
+
+| 模板 | SQL（全部参数化，走白名单闸门） |
+|---|---|
+| `lookup_model` | `SELECT class_alias, class_name, class_path, level FROM wisetao_meta.meta_class_info WHERE app_id=? ORDER BY class_path` |
+| `lookup_object` | `SELECT id, node_code, node_name, class__path, parent_id, tree_level, position FROM wisetao_meta.wt_elm_equipment WHERE deleted=0 AND app_id=? AND (class__path LIKE ? OR node_name LIKE ? OR parent_id=?) LIMIT ?` |
+| `lookup_tag_definition` | `SELECT t.tag_code, t.name, t.tag_type, t.calculated, t.in_out FROM wisetao_meta.meta_classtagmodel t JOIN wisetao_meta.meta_class_info c ON t.master_class_id=c.id WHERE c.class_path=? AND t.deleted=0 ORDER BY t.tag_code` |
+| `query_alarm` | `SELECT id, alarm_title, alarm_time, alarm_level, alarm_status, entity_name, tag_code, description FROM wisetao_meta.wt_bas_alarmrecord WHERE deleted=0 AND app_id=? AND (alarm_time BETWEEN ? AND ?) AND (alarm_level=? OR 1=?) ORDER BY alarm_time DESC LIMIT ?` |
+| `query_alarm_config` | `SELECT tag_code, tag_comment, cus_class_path, alarm_type, alarm_level, alarm_classify, is_white, status FROM bole.wt_cus_alarmdynamicconfig WHERE deleted=0 AND app_id=? AND (cus_class_path=? OR 1=?) ORDER BY tag_code` |
+| `resolve_tag` step1 | `SELECT id, class__path FROM wisetao_meta.wt_elm_equipment WHERE node_name=? AND deleted=0 AND app_id=? LIMIT 1` |
+| `resolve_tag` step2 | `SELECT t.tag_code FROM wisetao_meta.meta_classtagmodel t JOIN wisetao_meta.meta_class_info c ON t.master_class_id=c.id WHERE t.name=? AND c.class_path=? AND t.deleted=0 LIMIT 1` |
+| `resolve_tag` step4 | `SELECT alias FROM wisetao_meta.wt_iot_tags WHERE tagname=? AND deleted=0 LIMIT 1` |
+| `resolve_tag` step5 | `SELECT tagIndex FROM WT_DB.WT_TAG WHERE tagName=? LIMIT 1`（走 StarRocks） |
+
+### 14.8 不做的事（P1 范围外）
+
+| 不做 | 原因 | 阶段 |
+|---|---|---|
+| `aggregate_cube` 独立工具 | D3 决定 aggregate 内部自动路由，无需独立工具 | — |
+| Ice API 通道 | python 接口暂不考虑（用户决策） | 搁置 |
+| REST 代理 /rtdb/* / /iot-etl/iot/tag/* | 后端服务部署主机/端口未实测 | P2 候选 |
+| WT-SQL 模板查询 /meta/model/queryByGenericSql | 11 个方案全系统级，无光伏场景方案；复用需自建 | P2 候选 |
+| `evaluate_rules` 强制路由 | 机理判定 | P2 |
+| `search_knowledge` RAGFlow | 知识检索 | P3 |
+| 写操作（告警处理/配置修改） | 只读红线 | 永不做 |
+
+### 14.9 验证计划
+
+P1 实现完成后，用 `scripts/e2e-p1.ts` 验证以下场景（§16 实测验收 8/8 通过）：
+
+| 场景 | 工具链 | 实测结果（2026-09-09 真实库） |
+|---|---|---|
+| "有哪些光伏设备模型" | lookup_model | 35 行 / 345ms |
+| "1号箱变1号逆变器"（具体设备反查） | lookup_object(node_name='1号箱变1号逆变器') | 20 行 / 25ms |
+| "华为逆变器有哪些测点" | lookup_tag_definition(class_path='wt_elm_equipment/wt_iot_huaweisun2000') | 221 行 / 73ms |
+| "1号箱变1号逆变器 总发电量 1D 粒度的 tagName" | resolve_tag | tagName=HWNBYC174_1D_100620000015521, tagIndex=1961441, alias=总发电量日统计测点 / 112ms |
+| "上述 tagName 在 TSDB 的最新值" | latest_value（兜底路） | 当前集群负载下 30s+（与 §13.5 遗留相符；真实有数据时 2s 内返回） |
+| "上述 tagName 13 天日均" | aggregate（cube 路由 WT_CUBE） | AVG=1665.5 / 12 样本 / 104ms |
+| "最近有什么告警" | query_alarm(2024-06-16~10-10) | 5 行 / 13ms（真实最新 11619 条告警事件） |
+| "AGC 设备的告警配置" | query_alarm_config(cus_class_path='wt_elm_equipment/wt_iot_agc_adb3be1a') | 0 行（AGC 子类未独立配置；正常） |
+| "全 app_id 的告警配置" | query_alarm_config() | 379 行 / 14ms |
+
+**实测发现的两点修正**：
+- `class_path` 真实形态为 `wt_elm_equipment/wt_iot_huaweisun2000`（华为逆变器）等以表名打头并由 `meta_class_info.parent_class_id` 串联的多级路径——§14.2 文档原描述的 `wisetao.pv.inverter` 形态是上游规格愿景，联调库尚未迁移；工具 SQL 按 `class_path = ?` 精确匹配工作正常。
+- `meta_classtagmodel.name` 是规格中文名（如"总发电量"、"逆变器电流离散度"），与设备 `node_name` 同样是上游录入的中文，必须严格相等；LLM 调用 resolve_tag 前应先调 lookup_tag_definition 确认精确中文名。
+
+### 14.10 查询通道与聚合路由配置（性能优化 + 通用/特定分离）
+
+> **调研依据**：`scripts/agg-probe.mjs` 实测 + `D:\svn\...\task\vo\CubeType.java` + `Granularity.java` 反编译。
+
+#### 14.10.1 性能结论
+
+| 问题 | 结论 | 依据 |
+|---|---|---|
+| MySQL wt_iot_tags 205 万行查 tagName 慢吗？ | **不慢** | `tagname` 列有**唯一索引**（`unique_index_wt_iot_tags_tagname5651`），精确查找 O(log N) ≈ 几毫秒 |
+| WT_DATA 能直接查聚合粒度吗？ | **不能** | 实测 `HWNBYC174_1H/1D/1M/1Y` 的 tagIndex 在 WT_DATA 中都是 0 行；**只有 1O（原始）粒度有数据** |
+| 聚合数据在哪？ | **WT_CUBE** | 2553 万行，含 `value/avgValue/maxValue1/minValue1/sumValue/countValue` 6 种聚合值 |
+| WT_CUBE 是通用的吗？ | **不是** | `cubeType` 1-20 全是光伏特定（华为/阳光 × 组串/逆变器 × 电流/电压/电量 × 汇总/离散率 + 储能 4 种） |
+| Granularity 是通用的吗？ | **是** | Hour(1)/Day(2)/Month(3)/Year(4)/Week(5)，任何行业通用 |
+
+#### 14.10.2 CubeType 枚举（光伏特定，20 种）
+
+| cubeType | 枚举名 | 语义 | 行数 |
+|---|---|---|---|
+| 1 | HwStringI | 华为组串电流汇总值 | 324 万 |
+| 2 | HwStringU | 华为组串电压汇总值 | 382 万 |
+| 3 | YgStringI | 阳光组串电流汇总值 | 769 万 |
+| 4 | YgStringU | 阳光组串电压汇总值 | 859 万 |
+| 5 | HwInverterI | 华为逆变器电流汇总值 | 14 万 |
+| 6 | YgInverterI | 阳光逆变器电流汇总值 | 31 万 |
+| 7 | HwInverterQ | 华为逆变器电量值 | 22 万 |
+| 8 | YgInverterQ | 阳光逆变器电量值 | 48 万 |
+| 9-12 | *StringILsl/*StringULsl | 组串电流/电压离散率 | 各 14-31 万 |
+| 13-16 | *InverterILsl/*InverterQLsl | 逆变器电流/电量离散率 | 各 1-3 万 |
+| 17-20 | CnFdl/CnCdl/CnSwl/CnXwl | 储能放电/充电/上网/下网量 | 各 1-3 万 |
+
+#### 14.10.3 三层查询路由架构
+
+```
+用户问数请求
+     │
+     ▼
+┌─────────────────────────────────────────────────────┐
+│ 层1：通道路由（query.tsdbChannel）                    │
+│   'sql'  → StarRocks SQL 直连（默认，已验证）        │
+│   'rest' → AGP REST API（/iot-etl/iot/tag/* 或 /rtdb/*）│
+│   配置项：query.tsdbChannel                          │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│ 层2：聚合表路由（query.aggregateTable）               │
+│   'WT_CUBE' → 优先查聚合表（光伏特定，快）           │
+│   null      → 强制只查 WT_DATA（通用，慢但通用）     │
+│   配置项：query.aggregateTable                       │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│ 层3：粒度路由（tagName 粒度后缀）                     │
+│   1O → WT_DATA（原始数据，tagIndex 过滤）            │
+│   1H/1D/1M/1Y → 聚合粒度：                           │
+│     a. 先查 WT_DATA 该粒度 tagIndex（通常 0 行）     │
+│     b. 若 WT_DATA 无数据且 aggregateTable≠null：     │
+│        → 查 WT_CUBE（cubeType + granularity 映射）   │
+│     c. 若 aggregateTable=null 或 WT_CUBE 无数据：    │
+│        → 回退 WT_DATA 1O 粒度 + 应用层聚合           │
+└─────────────────────────────────────────────────────┘
+```
+
+#### 14.10.4 Config 新增配置项
+
+```yaml
+query:
+  # 层1：时序数据查询通道
+  tsdbChannel: 'sql'        # 'sql'(默认,StarRocks直连) | 'rest'(AGP REST API)
+  
+  # 层1：REST 通道配置（tsdbChannel='rest' 时生效）
+  rest:
+    baseUrl: ''             # AGP REST 基址，如 'https://agp.sksyri.com/s1M6_uE9/wz/iot-etl/iot/'
+    # 或后端代理：'http://192.168.101.54:PORT/rtdb/'
+    wtAppid: ''             # 鉴权三头
+    wtToken: ''
+    wtOpenid: ''
+  
+  # 层2：聚合表名（光伏特定）
+  aggregateTable: 'WT_CUBE' # 默认 'WT_CUBE'；设为 null 则强制只用 WT_DATA
+  # null 适用场景：非光伏行业 / WT_CUBE 数据不可信 / 调试
+  
+  # 层2：cubeType 映射（光伏特定，从 CubeType.java 枚举提取）
+  cubeTypeMap:
+    1: '华为组串电流汇总值'
+    2: '华为组串电压汇总值'
+    # ... 1-20 全量见 §14.10.2
+    17: '储能放电量'
+    20: '储能下网量'
+  # cubeTypeMap 为空 → 不做 cubeType 路由，只按 granularity 查 WT_CUBE
+  
+  # 层3：粒度后缀 → granularity 值映射
+  granularityMap:
+    '1H': 1   # Hour
+    '1D': 2   # Day
+    '1M': 3   # Month
+    '1Y': 4   # Year
+```
+
+#### 14.10.5 API vs SQL 通道选型
+
+| 通道 | 优势 | 劣势 | 适用场景 | 状态 |
+|---|---|---|---|---|
+| **StarRocks SQL** | 最快、最灵活、已 P0 验证、免鉴权 | 需数据库直连、需白名单维护 | 默认通道 | ✅ P0 |
+| **REST /iot-etl/iot/tag/*** | 官方推荐、免数据库直连、走网关 | 需网关可达、鉴权三头、公网延迟 | 网关可用时 | P1 候选 |
+| **REST /rtdb/*** | 免 Ice 客户端、后端代理 | 需后端服务可达、端口待实测 | 后端可达时 | P2 候选 |
+| **Ice API** | 功能最全（10 方法） | python 搁置、Ice 3.7 兼容 | 搁置 | ❌ |
+| **WT-SQL** | 模板化、中文查询 | 无光伏场景方案 | 复用需自建 | P2 候选 |
+
+**决策**：默认走 SQL（`tsdbChannel: 'sql'`），提供配置切换到 REST。不做 Ice。WT-SQL 是 P2 候选。
+
+**REST 通道实现条件**（P1 可选）：
+- `tsdbChannel: 'rest'` 时，`latest_value` / `time_series` / `aggregate` 三个时序工具改走 REST API
+- `lookup_tag` 仍走 SQL（WT_TAG 字典在 StarRocks，REST 无对应接口）
+- MySQL 元数据工具（lookup_model 等）仍走 MySQL SQL（REST /meta/object/* 是 P2 候选）
+- REST 通道需实现鉴权三头注入 + 错误码映射
+
+#### 14.10.6 通用 vs 光伏特定的分离原则
+
+| 层 | 通用（任何行业） | 光伏特定（app_id=10062） |
+|---|---|---|
+| 通道 | SQL / REST（可配置） | — |
+| 粒度路由 | 1O→WT_DATA，1H/1D/1M/1Y→聚合表或回退 | — |
+| 聚合表 | `aggregateTable: null` 时走 WT_DATA 全聚合 | `aggregateTable: 'WT_CUBE'` 时走预聚合 |
+| cubeType | `cubeTypeMap: {}` 空时不做 cubeType 路由 | `cubeTypeMap` 填 1-20 映射 |
+| 业务派生表 | 不路由 | WT_LOW_STRINGS/WT_DUST/WT_INVERTER_FAILURE 等（P2 按需加工具） |
+| 模型过滤 | `appId` 可配 | 默认 10062 |
+
+> **核心原则**：通用层通过 `aggregateTable=null` + `cubeTypeMap={}` 退化为"只用 WT_DATA + 应用层聚合"的纯通用实现。光伏特定层通过填充配置项启用预聚合路由。**LLM 不感知路由细节**，只调工具，工具内部按配置决定查哪张表。
+
+#### 14.10.7 DSH 配置页（已实现，2026-09-09）
+
+**模式选型**（参照 harness examples 的两个插件）：
+
+| 参照 | 模式 | 取舍 |
+|---|---|---|
+| `examples/knowledge` | schemastery `Config` schema 即设置页——DSH 自动渲染，部署默认值走 cordis.yml，运行时另有 `resolveConfig` 合并钳制 | ✅ 采用。零自建 UI 成本，与本项目既有 cordis.patch 接线形态吻合 |
+| `examples/ragflow` | 第三方插件进不了宿主 Settings 白名单（`WEB_SETTINGS_NAMESPACES`），故自建 loopback 配置页（`ctx.webServer` + `ctx.settings` + `ctx.credentials`） | P2 备选：仅当目标部署的 Settings 不渲染第三方插件、或需要 credential-reference 管理密码时启用 |
+
+**实现**（`src/dsh/plugin.ts`）：
+
+- **分组**：七个嵌套 object（StarRocks 连接 / MySQL 业务库 / 表名映射 / 查询路由 / 护栏阈值 / 安全 / 审计 + 安装），每组 `.collapse()` 可折叠并带中文说明；
+- **描述**：全部字段 `.description()`，说明后果而非重复字段名（如 MySQL host "留空则 P0 面可用、P1 元数据/告警工具不可用"）；
+- **密文**：三个密码/token 走 `.role('secret')`（页面遮蔽回显；进程内使用，不落盘不进日志）；
+- **JSON 映射**：`cubeTypeMapJson` / `granularityMapJson` 用 `.role('textarea')` 呈现 JSON 文本，`toRuntimeConfig()` 在加载期 parse + 校验（坏 JSON 报错并带字段名）；cordis.yml 部署默认值可直接给对象（两形态都收）；
+- **校验**：`timeZone` 带 `.pattern(±HH:MM)`、端口 `.min(1).max(65535)`、超时 `.min(1000)`；`host/database` `.required()`；最终仍过 `resolveConfig` 统一校验（fail loud）；
+- **红线不进页面**：`security.readOnly` 不出现在 schema（P0 恒 true，只能由 yml 显式给出且会被 `resolveConfig` 拒绝 false）；
+- **默认映射常量**（cubeType/granularity/mysql 白名单）从 `src/config.ts` 导出共用，页面与运行时无第二套拷贝。
+
+**页面分组与字段一览**：
+
+| 分组 | 字段（默认值） | 说明要点 |
+|---|---|---|
+| StarRocks 连接 | host* · port(9030) · user(askdata_ro) · password · database* · driver(mysql2/cli) · cliPath | P0 必配；生产必须只读账号 |
+| MySQL 业务库 | host('') · port(3306) · user('') · password · database(wisetao_meta) | 留空则 P1 六工具调用期报 `BACKEND_DOWN` |
+| 业务范围 | appId(10062) · tables.tag/data/cube/device | 模型与告警的过滤范围；表名按部署改 |
+| 查询路由 | tsdbChannel(sql/rest) · rest.baseUrl/wtAppid/wtToken/wtOpenid · aggregateTable(WT_CUBE) · cubeTypeMapJson · granularityMapJson | §14.10 三层路由；`aggregateTable` 置空退回纯 WT_DATA；JSON 置 `{}` 关闭对应路由 |
+| 护栏阈值 | maxScanRows(1亿) · maxTimeRangeDays(365) · badValueMask(128) · queryTimeoutMs(15000) · maxLimit(10000) · defaultLimit(1000) · defaultLookupLimit(100) · defaultAlarmLimit(100) · timeZone(+08:00) | 全部执行前机械生效 |
+| 安全 | tableWhitelist · mysqlTableWhitelist · scanGuard(true) | 白名单外表 → `SENSITIVE_TABLE`；readOnly 不开放 |
+| 审计 | enabled(false) · table · userId/appId/orgId | 进程内哈希链；落库 P2 |
+| 安装 | installPreset(true) · presetId(askdata) | 幂等安装，绝不覆盖用户改动 |
+
+> **密码安全**：`.role('secret')` 在 DSH 页面遮蔽回显，进程内传入驱动连接参数，不落盘、不进日志、不进测试快照（AGENTS.md 红线）。P2 可按 ragflow 模式接 `@deepseek-ai/dsh-credentials` 做 credential-reference。
+
+> **测试**：`tests/dsh-config.spec.ts`——schema 默认值可全程装配（Config → toRuntimeConfig → createAskdataService）、JSON 映射四形态解析（字符串/对象/空/坏值）、页面元数据断言（secret/textarea 角色、collapse 分组、description、timeZone pattern、readOnly 缺席）。
+
+## 15. 评审修复记录（2026-09-09）
+
+> 对照评审（参考 dsh-data-agent）发现 P1 代码三处真实库级缺陷 + 若干加固项，本轮全部修复；真实 DDL 以 StarRocks 实测为准（WT_TAG 样例 `HWNBYC174_1D_100620000015524`；WT_CUBE 列 `device/tagCode/cubeType/timestamp/granularity/value/avgValue/maxValue1/minValue1/sumValue/countValue`）。
+
+| # | 缺陷 / 隐患 | 修复 | 落点 |
+|---|---|---|---|
+| 1 | resolve_tag tagName 拼接顺序颠倒（`deviceId_tagCode_粒度`），真实格式为 `tagCode_粒度_deviceId`（§14.3 规格 + WT_TAG 实测一致），每次调用必然 TAG_NOT_REGISTERED；旧测试把错误顺序固化 | 改为 `${tagCode}_${granularity}_${deviceId}`，测试金样同步 | `tools/resolve-tag.ts` |
+| 2 | aggregate 优化路径（tagIndex IN 子查询版）分组列仍引用已删除的 `b.tagName` 别名 → device/tagcode 分组必出非法 SQL | device/tagcode 分组回退 LEFT JOIN 版模板（e2e 实证路径）；其余维度走 IN 子查询版 | `tools/aggregate.ts` |
+| 3 | aggregateCubeSql 引用 WT_CUBE 上不存在的列（`tagIndex` 子查询、`quality` 位过滤），cube 路由整体不可用；且 STDDEV/VAR 违反 D3 也被路由 | 改为 tagCode(+device)+granularity 等值过滤（真实列），去掉 quality 过滤；STDDEV/VAR 不路由；新增 **cubeType 唯一性预检**（实测存在 1 个 tagCode 对 2 个 cubeType 的口径歧义，不唯一即回退 WT_DATA）；分组用表自带 device/tagCode 列 | `src/sql/templates.ts`、`tools/aggregate.ts` |
+| 4 | SQL 字符串转义只双写引号不转反斜杠：regexp 串里 `\d` 会被 MySQL 转义规则吞成 `d`、尾部 `\` 吃掉闭合引号 | 统一 `escapeSqlString`（先反斜杠后引号 doubling），regexp/LIKE/精确匹配全走它 | `src/sql/templates.ts` |
+| 5 | 白名单闸门存在调用点旁路（latest_value 存在性预检、扫描护栏估算直接执行） | 闸门下沉到服务执行器咽喉点统一收口；工具层闸门保留为纵深防御 | `src/index.ts` |
+| 6 | P1 六工具未接线（service 只暴露 p0Tools、persona 只列五工具） | `createAskdataService` 暴露 11 工具；persona/ask-smoke 提示词同步 | `src/index.ts`、`preset/askdata/agent.cordis.yml` |
+| 7 | timeZone 非 ±HH:MM 格式静默按 UTC 换算；纯日期输入被 Date.parse 按 UTC 解析使"全天"窗口平移数小时 | 加载期校验 ±HH:MM；纯日期按会话时区零点取墙钟 | `src/config.ts`、`src/sql/validate.ts` |
+| 8 | mysqlConnection 默认值烙印内网 IP + root | 默认留空（P0 面不受影响，P1 工具调用期报明确 BACKEND_DOWN）；patch 文件标注 DEV-ONLY | `src/config.ts`、`src/dsh/plugin.ts`、`cordis.patch.yml` |
+| 9 | CLI 通道 SQL 走 argv `-e`（进程列表可见、受命令行长度限制） | SQL 改经 stdin 送达（对齐 dsh-data-agent 通道约定） | `src/clients/starrocks.ts` |
+| 10 | 工具内嵌第二套默认行数（违反"阈值全走 config"约定）；词法预处理先剥注释后剥字符串（串内 `--`/`#` 干扰闸门视角） | defaultLimit/defaultLookupLimit/defaultAlarmLimit 入配置；字符串先于注释剥离 | `src/config.ts`、`src/sql/whitelist.ts` |
+
+**遗留（转后续）**：
+- `docs/spec/tools_v3.json` 未含 P1 六工具——规格副本须从 `D:\svn\WISETao_custom_demo\docs` 源目录同步（AGENTS.md 规矩，本仓库不手改 spec）。
+- WT_CUBE `value` 列的口径（该粒度下测点汇总值）在离散率类 cubeType 上的 AVG/SUM 语义需与 AGP 采集侧核对；`aggregateTable: ''` 可一键关闭路由退回 WT_DATA。
+- time_series 对 1H/1D/1M/1Y 粒度 tagName 在 WT_DATA 无数据（§14.10.1），趋势类问题应使用 1O tag + 聚合桶，persona 已提示。
+- 审计哈希链落库（旁路账号）与 preset 升级机制（包自带预设自动更新）为 P2 项。
+- §14.10.2 列的 WT_CUBE cubeType 1-20 映射是基于反编译推导，联调库尚未确认全部 20 类均有数据；当前实测仅 cubeType=7（华为逆变器电量值，HWNBYC174）一类走通 cube 路由。
+
+## 16. P1 真实数据验收（2026-09-09）
+
+> 与 §13 P0 真实库验收对齐：MySQL 5.7.38 @ 192.168.101.54:3306（root/Aa123456.，wisetao_meta + bole）；StarRocks 3.1.9 @ 192.168.101.54:9030（WT_DB）。执行 `MY_PASSWORD='Aa123456.' npx tsx scripts/e2e-p1.ts`，11 工具中 8 个 P1 相关调用 8/8 通过。
+
+| # | 工具 | 用例（用户问题 / LLM 决策） | 实测 |
+|---|---|---|---|
+| 1 | `lookup_model` | "有哪些光伏设备模型" | 35 行 / 345ms；含 wt_iot_huaweisun2000、wt_iot_sungrowsg、wt_iot_padmounted 等 |
+| 2 | `lookup_object` | "1号箱变1号逆变器"（模糊匹配） | 20 行 / 25ms；`class__path=wt_elm_equipment/wt_iot_huaweisun2000`，`id=100620000015521` |
+| 3 | `lookup_tag_definition` | "华为逆变器有哪些测点" | 221 行 / 73ms；如 HWNBYC174=总发电量、HWNBYC004=组串电压高 |
+| 4 | `resolve_tag` | "1号箱变1号逆变器 总发电量 1D" | 1 行 / 112ms；`tagName=HWNBYC174_1D_100620000015521`，`tagIndex=1961441`，`alias=总发电量日统计测点` |
+| 5 | `latest_value` | 同上 tagName 兜底路 | 30s+ 超时（与 §13.5 遗留相符；今日集群负载高，09-07 实测单点 2s） |
+| 6 | `aggregate`（cube 路由） | 13 天日均（2024-08-01~08-14） | `FROM WT_CUBE a` / 104ms；AVG=1665.5、12 样本（cubeType=7，唯一性预检通过） |
+| 7 | `query_alarm` | "最近有什么告警"（2024-06-16~10-10） | 5 行 / 13ms；真实最新告警事件 `Ⅰ-#7B储能电池堆8号簇 单体温差过高一级报警 @ 2024-10-09 21:35:50` |
+| 8a | `query_alarm_config` | "AGC 设备的告警配置" | 0 行 / 7ms（AGC 子类无独立配置属正常） |
+| 8b | `query_alarm_config` | 无过滤全量 | 379 行 / 14ms；覆盖 6 类设备（储能 Bank/Rack/Pack/AGP、箱变、防孤岛等） |
+
+**典型 SQL 样例**（来自 `e2e-p1.ts` 运行输出）：
+
+```sql
+-- resolve_tag step5
+SELECT tagIndex FROM WT_TAG WHERE tagName = 'HWNBYC174_1D_100620000015521'
+
+-- aggregate cube 路由
+SELECT 'all' AS `bucket`, AVG(a.`value`) AS `aggValue`, COUNT(*) AS `sampleCount`
+FROM WT_CUBE a
+WHERE a.`timestamp` >= '2024-08-01 00:00:00' AND a.`timestamp` < '2024-08-14 00:00:00'
+  AND a.`tagCode` = 'HWNBYC174' AND a.`device` = 100620000015521 AND a.`granularity` = 2
+LIMIT 1000
+
+-- query_alarm
+SELECT id, alarm_title, alarm_time, alarm_level, alarm_status, entity_name, tag_code, description
+FROM wisetao_meta.wt_bas_alarmrecord
+WHERE deleted = 0 AND app_id = 10062
+  AND alarm_time >= '2024-06-16 00:00:00' AND alarm_time < '2024-10-10 00:00:00'
+ORDER BY alarm_time DESC LIMIT 5
+```
+
+**验收揭示的文档偏差**（已并入 §14.3 / §14.9）：
+- `class_path` 真实形态是 `wt_elm_equipment/wt_iot_huaweisun2000`（以表名打头的多级路径），不是 §14.2 早期描述的 `wisetao.pv.inverter` 形式（上游规格愿景）。
+- `meta_classtagmodel.name` 是规格中文名（如"总发电量"），必须严格相等匹配——LLM 在调用 resolve_tag 前应先用 lookup_tag_definition 确认精确中文名。
+- `wt_elm_equipment.class__path` 当前存的是 `wt_elm_equipment` 表名字符串而非真实模型路径，与 `lookup_object` 的 LIKE 过滤兼容性尚可（设备行同样存此值）。
