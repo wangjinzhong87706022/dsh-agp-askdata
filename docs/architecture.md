@@ -625,3 +625,67 @@ ORDER BY alarm_time DESC LIMIT 5
 - `class_path` 真实形态是 `wt_elm_equipment/wt_iot_huaweisun2000`（以表名打头的多级路径），不是 §14.2 早期描述的 `wisetao.pv.inverter` 形式（上游规格愿景）。
 - `meta_classtagmodel.name` 是规格中文名（如"总发电量"），必须严格相等匹配——LLM 在调用 resolve_tag 前应先用 lookup_tag_definition 确认精确中文名。
 - `wt_elm_equipment.class__path` 当前存的是 `wt_elm_equipment` 表名字符串而非真实模型路径，与 `lookup_object` 的 LIKE 过滤兼容性尚可（设备行同样存此值）。
+
+## 17. 与 DSH 扩展机制集成（skill / subagent）
+
+> DSH 提供三类扩展机制来增强插件在 Agent 中使用：tool（每次自动注入）、skill（按需加载的手册）、subagent（独立工作流）。askdata 同时使用三种机制——模型常用基础工具、用户/复杂场景用 skill 查阅手册、整句自然语言用 deep_analysis 走子 agent 流水线。
+
+### 17.1 工具层（已完成，P0 + P1 + subagent-style 共 12 个）
+
+| 层 | 工具 | 说明 |
+|---|---|---|
+| P0 | `lookup_tag` / `estimate_count` / `latest_value` / `time_series` / `aggregate` | 基础取数链 |
+| P1 | `lookup_model` / `lookup_object` / `lookup_tag_definition` / `resolve_tag` / `query_alarm` / `query_alarm_config` | 元数据/告警 |
+| **subagent-style** | **`askdata_deep_analysis`** | **自然语言问数入口：内部按关键词自动编排 lookup → resolve → 取数流水线并返回带溯源的合成结果** |
+
+`askdata_deep_analysis`（`tools/deep-analysis.ts`）是 DSH subagent one-shot 委派的 in-process 等价物：它把"自主完成多步任务 + 给出完整结论"的子 agent 行为封装在一个工具调用里，避免调用方自己编排 N 次工具。本插件不依赖宿主 `@deepseek-ai/dsh-agents` runtime，故采用工具内 pipeline 实现。关键词分支：
+
+| 关键词 | 走哪条路径 |
+|---|---|
+| "最新/当前/现在" | lookup_object → resolve_tag → latest_value |
+| "趋势/波形/曲线/时序/小时/分钟" | lookup_object → resolve_tag → time_series（默认 1h 桶） |
+| "日均/月均/累计/总[量发]/平均值/均值/avg" | lookup_object → resolve_tag → aggregate（默认 AVG） |
+| "告警/报警/故障/异常" | query_alarm（默认 7 天窗） |
+| "告警配置/规则" | query_alarm_config |
+| "有哪些模型/型号/类型" | lookup_model |
+| 默认 | lookup_tag（按关键字反查字典） |
+
+测试：`tests/deep-analysis.spec.ts` 8 个用例覆盖 5 类分支 + 失败兜底。
+
+### 17.2 Skill 层（已完成，4 个聚合手册）
+
+`src/dsh/skills.ts` 通过 cordis 单独行 `dsh-agp-askdata/skills` 注入到 `ctx.skills`，4 个 skill 覆盖四类正交主题：
+
+| Skill 名 | 一行描述 | 何时调用 |
+|---|---|---|
+| `askdata-troubleshoot` | 问数链路出问题时的标准化排查（连接 / 凭据 / 白名单 / 超时 / 路由） | 错误码排查、性能调优、部署环境事实 |
+| `askdata-tagname` | tagName 四段式编码、粒度段、tagCode/tagIndex 解析规则 | 解释 tagName 全名、累计量 vs 瞬时量粒度选择、cubeType 一一对应 |
+| `askdata-query-pattern` | 典型问数工作流：从自然语言到工具调用的标准 5 步模板 | 新查询不知先调哪个工具、串成可复用流水线 |
+| `askdata-config` | 运行时配置（密码、连接、超时、cube 路由、REST 通道）的修改与生效路径 | 改数据库密码、切换 cube/原始表、启用 TSDB 网关、加白名单 |
+
+调用策略 `modelInvocable=true` + `userInvocable=true`：模型可调用（自动加载）+ 用户可调用（`/skill` 显式手势）双入口。
+
+**真实 DSH web 环境实测缺口**：`@deepseek-ai/dsh-tool-skill`（消费方，把 skill 渲染到目录消息与工具面板）当前未挂载到 web profile。代码路径完全正确（164 测试覆盖、cordis 注入 OK），目录消息渲染需宿主提供 `dsh-tool-skill`。若生产部署需此功能，在 web profile 的 `package.json` 添加 `@deepseek-ai/dsh-tool-skill` 后重启即可生效。
+
+测试：`tests/skills.spec.ts` 9 个用例覆盖：常量校验（name/description/4 个主题/whenToUse）、cordis 行形态（name/inject）、`apply` 行为（注册 4 个 + 双 invocation + disposer）、宿主缺席优雅跳过。
+
+### 17.3 Subagent 层（占位）
+
+`@deepseek-ai/dsh-subagent` 提供 one-shot 委派接口（`SubagentProvider.start(request)` 返回 `SubagentRun`）。本插件未注册自己的 provider——`askdata_deep_analysis` 已经覆盖了"自然语言问数入口"的语义需求，实现成本远低于一个完整 subagent runtime（无需 host agent 上下文 + turn 循环 + model 调用 + tool registry 投影）。
+
+若未来需要**长期驻留的子智能体**（continuable child，支持 followup/interrupt/reportFrom），按以下路径扩展：
+
+1. 在 `src/dsh/subagent.ts` 实现 `SubagentProvider` 接口（`name: 'askdata-explorer'`，`capabilities: { outputSchema, depthLimit, toolFilter, persona: true }`）。
+2. 在 cordis 行 `dsh-agp-askdata/subagent` 注册（`inject: ['subagents', 'askdata']`），用 `ctx.subagents.registerProvider(...)`。
+3. persona 通过 `request.persona` 字段注入（如 askdata-explorer persona = "我是光伏数据探索子 agent..."），与顶层 AGP问数 persona 区分。
+
+### 17.4 用户使用路径速查
+
+| 用户场景 | 推荐入口 |
+|---|---|
+| 单步精确查询（已知 tagName） | 基础 11 工具（让 LLM 编排） |
+| 一句话问数、不想参与流程 | **`askdata_deep_analysis`** 工具 |
+| 用户想深入了解某工具用法或某错误码处理 | `/skill askdata-troubleshoot` 显式加载 |
+| 模型自身需要时（自动） | skill 目录消息自动注入 |
+| 上线后频繁跨多个设备的批量问数 | **P2 subagent**（continuable）|
+

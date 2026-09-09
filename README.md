@@ -4,9 +4,13 @@ AGP TSDB / Database 智能问数的 DSH 插件（P0：StarRocks TSDB 面）。
 
 自然语言提问 → LLM 选择固定语义 Tool（模板化 SQL，禁止自由拼 SQL）→ 基础库白名单校验 → 扫描护栏 → StarRocks 查询 → AGP 标准结构化返回 + 审计哈希链。
 
-## 状态：P0 + P1
+## 状态：P0 + P1 + Subagent-style
 
-已实现 **11 个语义工具**：P0（StarRocks TSDB 面）`lookup_tag` / `estimate_count` / `latest_value` / `time_series` / `aggregate`（自动路由 WT_CUBE），P1（MySQL 业务库面）`lookup_model` / `lookup_object` / `lookup_tag_definition` / `resolve_tag`（中文→tagName 映射链）/ `query_alarm` / `query_alarm_config`。校验层（只读 + 白名单 + 注入特征拒绝，闸门在服务执行器咽喉点收口）、质量位过滤（`bitand(quality,128)!=128`）、tagName 四段式解析、WT_QUERY_AUDIT 哈希链（进程内，落库 P2）。路线图见 [docs/architecture.md](docs/architecture.md) §1、§14、§15。
+已实现 **12 个语义工具**：P0（StarRocks TSDB 面）`lookup_tag` / `estimate_count` / `latest_value` / `time_series` / `aggregate`（自动路由 WT_CUBE），P1（MySQL 业务库面）`lookup_model` / `lookup_object` / `lookup_tag_definition` / `resolve_tag`（中文→tagName 映射链）/ `query_alarm` / `query_alarm_config`，subagent-style `askdata_deep_analysis`（自然语言问数一答到底入口）。校验层（只读 + 白名单 + 注入特征拒绝，闸门在服务执行器咽喉点收口）、质量位过滤（`bitand(quality,128)!=128`）、tagName 四段式解析、WT_QUERY_AUDIT 哈希链（进程内，落库 P2）。
+
+同时注册 **4 个 runtime skill**（`askdata-troubleshoot` / `askdata-tagname` / `askdata-query-pattern` / `askdata-config`），用户可通过 `/skill` 显式加载或模型自动发现。
+
+> 三层扩展机制共存的实现细节见 `docs/architecture.md` §17（skill 注入 + subagent 工具化封装）。
 
 ## 快速开始
 
@@ -29,6 +33,11 @@ const ctx = service.createContext()
 const result = await service.tools.find(t => t.name === 'lookup_tag')!
   .run({ keyword: '组串电流' }, ctx)
 // result.fields / result.data / result.errorCode —— AGP 标准契约
+
+// 一句话问数（subagent-style 工具）：
+const deep = await service.tools.find(t => t.name === 'askdata_deep_analysis')!
+  .run({ question: '1号箱变1号逆变器总发电量最近一周日均值是多少？' }, ctx)
+// deep.data 包含 trace 行（步骤/工具/耗时）+ 真实查询结果
 ```
 
 真实库验收（§13 / §16）：

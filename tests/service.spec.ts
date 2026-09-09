@@ -15,7 +15,7 @@ function service() {
 }
 
 describe('服务装配', () => {
-  it('暴露全部 11 个工具（P0 五 + P1 六）', () => {
+  it('暴露全部 12 个工具（P0 五 + P1 六 + subagent 一）', () => {
     expect(service().tools.map((t) => t.name)).toEqual([
       'lookup_tag',
       'estimate_count',
@@ -28,6 +28,7 @@ describe('服务装配', () => {
       'resolve_tag',
       'query_alarm',
       'query_alarm_config',
+      'askdata_deep_analysis',
     ])
   })
 

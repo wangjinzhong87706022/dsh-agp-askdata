@@ -19,6 +19,7 @@ import { lookupTagDefinitionTool } from './lookup-tag-definition.ts'
 import { resolveTagTool } from './resolve-tag.ts'
 import { queryAlarmTool } from './query-alarm.ts'
 import { queryAlarmConfigTool } from './query-alarm-config.ts'
+import { askdataDeepAnalysisTool } from './deep-analysis.ts'
 
 /** P0 全部工具，按推荐调用顺序排列。 */
 export const p0Tools: AskdataTool[] = [
@@ -39,8 +40,17 @@ export const p1Tools: AskdataTool[] = [
   queryAlarmConfigTool,
 ]
 
-/** 全部工具（P0 + P1）。 */
-export const allTools: AskdataTool[] = [...p0Tools, ...p1Tools]
+/**
+ * P2 subagent-style 工具：自然语言问数入口（自动流水线 + 溯源）。
+ * 工具面与 P0/P1 互斥：模型可视 12 个工具时倾向走基础工具 + 自己编排；
+ * 用户/简单场景倾向本工具"一答到底"。
+ */
+export const subagentTools: AskdataTool[] = [
+  askdataDeepAnalysisTool,
+]
+
+/** 全部工具（P0 + P1 + subagent-style，共 12 个）。 */
+export const allTools: AskdataTool[] = [...p0Tools, ...p1Tools, ...subagentTools]
 
 export {
   lookupTagTool,
@@ -54,5 +64,6 @@ export {
   resolveTagTool,
   queryAlarmTool,
   queryAlarmConfigTool,
+  askdataDeepAnalysisTool,
 }
 export type { AskdataTool, ToolContext, SqlExecutor, ToolLayer } from './types.ts'
