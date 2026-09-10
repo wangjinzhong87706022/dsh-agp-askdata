@@ -82,7 +82,7 @@ export const Config = z.object({
       wtAppid: z.string().default('').description('鉴权头 wt-appid'),
       wtToken: z.string().role('secret').default('').description('鉴权头 wt-token（密文）'),
       wtOpenid: z.string().default('').description('鉴权头 wt-openid'),
-    }).collapse().description('REST 通道鉴权'),
+    }).collapse().description('REST 通道鉴权（旧版网关）'),
     aggregateTable: z.string().default('WT_CUBE')
       .description('层2 聚合表路由：1H/1D/1M/1Y 粒度查该表；设为空串则只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),
     cubeTypeMapJson: z.string().role('textarea').default(JSON.stringify(DEFAULT_CUBE_TYPE_MAP, null, 2))
@@ -90,6 +90,16 @@ export const Config = z.object({
     granularityMapJson: z.string().role('textarea').default(JSON.stringify(DEFAULT_GRANULARITY_MAP, null, 2))
       .description('粒度后缀 → WT_CUBE granularity 值映射（JSON 对象，如 {"1H":1,"1D":2}）'),
   }).collapse().description('查询路由（§14.10 三层：通道 → 聚合表 → 粒度；LLM 不感知路由细节）'),
+
+  api: z.object({
+    baseUrl: z.string().default('https://www.openagp.top:9080').description('AGP REST API 基址'),
+    apiPrefix: z.string().default('/s1M6_uE9').description('API 前缀（如 /s1M6_uE9）'),
+    token: z.string().role('secret').default('').description('用户鉴权令牌 WT-TOKEN（进程内使用，不落盘不进日志）'),
+    openid: z.string().default('').description('用户 ID WT-OPENID'),
+    projectId: z.string().default('10462').description('项目 ID WT-PROJECTID'),
+    timeoutMs: z.number().default(15000).min(1000).description('单次请求超时（毫秒）'),
+    maxPageSize: z.number().default(1000).min(1).max(10000).description('单页最大返回行数（pageSize 上限）'),
+  }).collapse().description('AGP REST API 客户端配置（新 API 网关：/s1M6_uE9/wz/）'),
 
   system: z.object({
     maxScanRows: z.number().default(100_000_000).min(1).description('扫描护栏阈值（行）；区间估算超过即拒绝并提示 LLM 缩窗'),
@@ -169,6 +179,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
       cubeTypeMap: parseJsonMapField('query.cubeTypeMapJson', config.query.cubeTypeMapJson) as Record<number, string>,
       granularityMap: parseJsonMapField('query.granularityMapJson', config.query.granularityMapJson) as Record<string, number>,
     },
+    api: config.api,
     system: config.system,
     security: config.security,
     audit: config.audit,

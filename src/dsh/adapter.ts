@@ -10,6 +10,7 @@
  */
 
 import type { AskdataTool, ToolContext } from '../../tools/index.ts'
+import type { AskdataApiTool, ApiToolContext } from '../../tools-api/index.ts'
 import type { ToolResult } from '../result.ts'
 import { askdataError } from '../errors.ts'
 
@@ -148,4 +149,55 @@ function toValue(result: ToolResult): AskdataToolValue {
     executionMs: result.executionMs,
     auditId: result.auditId,
   }
+}
+
+/**
+ * 把框架无关的 AskdataApiTool 适配为 DSH 注册表可用的工具定义。
+ *
+ * @param tool - 框架无关 API 工具（name/description/inputSchema/run）。
+ * @param makeContext - 每次调用构造 ApiToolContext（宿主注入取消信号与审计链游标）。
+ */
+export function adaptAskdataApiTool(
+  tool: AskdataApiTool,
+  makeContext: (signal?: AbortSignal) => ApiToolContext,
+): AskdataToolDefinition {
+  const execute = async (args: unknown, exec: { signal?: AbortSignal }): Promise<unknown> => {
+    const result = await tool.run((args ?? {}) as Record<string, unknown>, makeContext(exec?.signal))
+    if (!result.success) {
+      throw askdataError(result.errorCode || 'BACKEND_DOWN', `${tool.name} 失败: ${result.errorMessage}`)
+    }
+    return toValue(result)
+  }
+  const presentTitle = (args: unknown): string => `${tool.name} ${summarizeArgs(args)}`
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: toParametersJsonSchema(tool.inputSchema),
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          toolName: { type: 'string' },
+          apiOrSql: { type: 'string' },
+          fields: { type: 'array', items: { type: 'object' } },
+          data: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          rowCount: { type: 'integer' },
+          executionMs: { type: 'integer' },
+          auditId: { type: 'string' },
+        },
+        required: ['success', 'toolName', 'apiOrSql', 'fields', 'data', 'rowCount', 'executionMs', 'auditId'],
+        additionalProperties: false,
+      },
+      render: (_args, value) => [{ type: 'text', text: renderAskdataResult(value as AskdataToolValue) }],
+    },
+    presentCall: (args) => ({
+      card: 'generic',
+      kind: 'read',
+      title: presentTitle(args),
+      rawInput: JSON.stringify(args),
+    }),
+    presentResult: (args) => ({ card: 'generic', title: presentTitle(args) }),
+    execute,
+  } satisfies AskdataToolDefinition
 }

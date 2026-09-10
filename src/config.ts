@@ -44,7 +44,7 @@ export interface TableNames {
 export interface QueryConfig {
   /** 层1：时序数据查询通道。 */
   tsdbChannel: 'sql' | 'rest'
-  /** REST 通道配置（tsdbChannel='rest' 时生效）。 */
+  /** REST 通道配置（tsdbChannel='rest' 时生效，旧版 AGP REST 网关）。 */
   rest: {
     baseUrl: string
     wtAppid: string
@@ -57,6 +57,24 @@ export interface QueryConfig {
   cubeTypeMap: Record<number, string>
   /** 层3：粒度后缀 → granularity 值映射。 */
   granularityMap: Record<string, number>
+}
+
+/** AGP REST API 客户端配置（新 API 网关：/s1M6_uE9/wz/）。 */
+export interface ApiConfig {
+  /** API 基址，如 https://www.openagp.top:9080。 */
+  baseUrl: string
+  /** API 前缀，如 /s1M6_uE9。 */
+  apiPrefix: string
+  /** 用户鉴权令牌（进程内使用，不落盘不进日志）。 */
+  token: string
+  /** 用户 ID。 */
+  openid: string
+  /** 项目 ID。 */
+  projectId: string
+  /** 单次请求超时（毫秒），默认 15000。 */
+  timeoutMs: number
+  /** 单页最大返回行数（pageSize 上限），默认 1000。 */
+  maxPageSize: number
 }
 
 /** 系统护栏与阈值。 */
@@ -111,6 +129,8 @@ export interface AskdataConfig {
   appId: number
   tables: TableNames
   query: QueryConfig
+  /** AGP REST API 客户端配置（新 API 网关）。 */
+  api: ApiConfig
   system: SystemLimits
   security: SecurityConfig
   audit: AuditConfig
@@ -176,6 +196,16 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
     granularityMap: DEFAULT_GRANULARITY_MAP,
   },
+  // AGP REST API 客户端默认配置（新 API 网关）
+  api: {
+    baseUrl: 'https://www.openagp.top:9080',
+    apiPrefix: '/s1M6_uE9',
+    token: '',
+    openid: '',
+    projectId: '',
+    timeoutMs: 15_000,
+    maxPageSize: 1000,
+  },
   system: {
     maxScanRows: 100_000_000,
     maxTimeRangeDays: 365,
@@ -213,6 +243,7 @@ export function resolveConfig(input: {
   appId?: number
   tables?: Partial<TableNames>
   query?: Partial<QueryConfig>
+  api?: Partial<ApiConfig>
   system?: Partial<SystemLimits>
   security?: Partial<SecurityConfig>
   audit?: Partial<AuditConfig>
@@ -230,6 +261,7 @@ export function resolveConfig(input: {
     cubeTypeMap: input.query?.cubeTypeMap ?? DEFAULT_CONFIG.query.cubeTypeMap,
     granularityMap: input.query?.granularityMap ?? DEFAULT_CONFIG.query.granularityMap,
   }
+  const api = { ...DEFAULT_CONFIG.api, ...input.api }
 
   assertIdentifier(tables.tag, 'tables.tag')
   assertIdentifier(tables.data, 'tables.data')
@@ -263,6 +295,7 @@ export function resolveConfig(input: {
     appId,
     tables,
     query,
+    api,
     system,
     security,
     audit,

@@ -1,12 +1,11 @@
 # The dsh-agp-askdata bundle patch: activates the plugin as a profile layer.
 #
-# P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
-# tools (11 in total). The `askdata` row mounts the plugin service (config,
-# clients, validation gate, audit chain). The `askdata-routes` web row and the
-# TSDB HTTP gateway tools join in P2.
+# feature/schema-validation 分支：通过 AGP REST API 取数（/s1M6_uE9/wz/），
+# 不直连 StarRocks/MySQL。8 个 API 工具（list_models/model_attributes/
+# query_model/tag_real/tag_history/tag_wide/tag_aggregate/resolve_tag）。
 #
-# NOTE: the connection values below are DEV-ONLY (内网联调环境 root 空密码)。
-# 生产部署必须改为只读账号；凭据不落盘、不进日志（AGENTS.md 红线）。
+# 凭据通过环境变量注入（AGP_API_TOKEN / AGP_API_OPENID），不落盘不进日志。
+# connection/mysqlConnection 保留但本分支不使用（tsdbChannel 走 API 通道）。
 - insert:
     - id: askdata
       name: 'dsh-agp-askdata'
@@ -24,3 +23,11 @@
           user: 'root'
           password: 'Aa123456.'
           database: 'wisetao_meta'
+        api:
+          baseUrl: 'https://www.openagp.top:9080'
+          apiPrefix: '/s1M6_uE9'
+          token: '${AGP_API_TOKEN}'
+          openid: '${AGP_API_OPENID}'
+          projectId: '10462'
+          timeoutMs: 15000
+          maxPageSize: 1000

@@ -1,0 +1,1344 @@
+{
+  "exportedAt": "2026-09-09T07:22:11.114Z",
+  "project": "10462",
+  "modelCount": 167,
+  "models": [
+    {
+      "id": 10000034711,
+      "alias": "产学研合作项目模型",
+      "name": "wt_1_chanxueyanhezuoxiangmumoxing",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_1_chanxueyanhezuoxiangmumoxing",
+      "description": "与高校、研究院所合作开展基础研究或应用研究项目管理内容",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000025495,
+      "alias": "专利著作权模型",
+      "name": "wt_elm_patents",
+      "path": "wt_elm_patents",
+      "description": "专利模型",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034714,
+      "alias": "软件开发项目",
+      "name": "wt_1_ruanjiankaifaxiangmu",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_1_ruanjiankaifaxiangmu",
+      "description": "为客户定制开发软件系统的管理信息",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000034713,
+      "alias": "运维服务项目模型",
+      "name": "wt_1_yunweifuwuxiangmumoxing",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_1_yunweifuwuxiangmumoxing",
+      "description": "为客户提供设备/系统的长期运行维护、巡检、故障处理、技术支持服务的运维服务项目管理信息",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000034698,
+      "alias": "项目分包合同",
+      "name": "wt_1_xiangmufenbaohetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_xiangmufenbaohetong",
+      "description": "主项目分包合同的所有信息",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000036629,
+      "alias": "交通公共基础设施模型",
+      "name": "wt_1_jiaotonggonggongjichusheshimoxing",
+      "path": "wt_elm_assetdetail/wt_1_jiaotonggonggongjichusheshimoxing",
+      "description": "交通公共基础设施模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000034722,
+      "alias": "文档拓展属性模型",
+      "name": "wt_1_wendangtuozhanshuxingmoxing",
+      "path": "wt_1_wendangtuozhanshuxingmoxing",
+      "description": "以键值对的模式描述文档的自定义拓展属性。可以支持高级检索。",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000038830,
+      "alias": "任务执行明细表",
+      "name": "wt_bas_task_exec_detail",
+      "path": "wt_bas_task_exec_detail",
+      "description": "任务执行明细表",
+      "tag": "其他"
+    },
+    {
+      "id": 10000039087,
+      "alias": "任务模型",
+      "name": "wt_1_renwumoxing",
+      "path": "wt_1_renwumoxing",
+      "description": "任务模型",
+      "tag": "其他"
+    },
+    {
+      "id": 10000038767,
+      "alias": "讲座和课程模型",
+      "name": "wt_1_jiangzuohekechengmoxing",
+      "path": "wt_1_jiangzuohekechengmoxing",
+      "description": "企业内部举办的讲座和课程。如：外请人员讲座、自己举办的集中培训和技术交流",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000034696,
+      "alias": "人员聘用合同",
+      "name": "wt_1_renyuanpinyonghetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_renyuanpinyonghetong",
+      "description": "保存人员聘用合同的基本信息",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000034697,
+      "alias": "工程承包合同",
+      "name": "wt_1_gongchengchengbaohetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_gongchengchengbaohetong",
+      "description": "保存工程承包合同的所有属性",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000035395,
+      "alias": "文章知识模型",
+      "name": "wt_1_wenzhangzhishimoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_wenzhangzhishimoxing",
+      "description": "保存相关的知识性文章的内容。并提供关键字进行检索的内容。如：调试经验，知识分享等。",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000036632,
+      "alias": "其他公共基础设施模型",
+      "name": "wt_1_qitagonggongjichusheshimoxing",
+      "path": "wt_elm_assetdetail/wt_1_qitagonggongjichusheshimoxing",
+      "description": "其他公共基础设施",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036604,
+      "alias": "其他公共基础设施明细模型",
+      "name": "wt_1_qitagonggongjichusheshimingximoxing",
+      "path": "wt_elm_assetdetail/wt_1_qitagonggongjichusheshimingximoxing",
+      "description": "其他公共基础设施明细模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000038778,
+      "alias": "计划子任务模型",
+      "name": "wt_1_jihuazirenwumoxing",
+      "path": "wt_1_jihuazirenwumoxing",
+      "description": "分解计划为不同的子任务。例如：设计一个软件，再分解为不同的模块",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 1000000032903,
+      "alias": "保养分项目模型",
+      "name": "wt_iot_work_order_maintenance_items",
+      "path": "wt_iot_work_order_maintenance_items",
+      "description": "列出保养需要做的分项标准工作内容",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034702,
+      "alias": "合同验收标准模型",
+      "name": "wt_1_hetongyanshoubiaozhunmoxing",
+      "path": "wt_1_hetongyanshoubiaozhunmoxing",
+      "description": "列出合同的验收标准",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 1000000032905,
+      "alias": "巡检分项目模型",
+      "name": "wt_iot_inspection_items",
+      "path": "wt_iot_inspection_items",
+      "description": "列出巡检需要做的分项标准工作内容",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034401,
+      "alias": "设备参数列模型",
+      "name": "wt_1_shebeicanshuliemoxing",
+      "path": "wt_1_shebeicanshuliemoxing",
+      "description": "列出每台设备的主要技术参数，用于针对设备的技术说明。如：计算机配置等",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 1000000032904,
+      "alias": "点检分项目模型",
+      "name": "wt_iot_check_items",
+      "path": "wt_iot_check_items",
+      "description": "列出点检需要做的分项标准工作内容",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000019091,
+      "alias": "参与者模型",
+      "name": "wt_bas_participant",
+      "path": "wt_bas_participant",
+      "description": "参与者模型",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 10000037197,
+      "alias": "可拖拽工具台模块信息",
+      "name": "wt_bas_draggable_workbench",
+      "path": "wt_bas_draggable_workbench",
+      "description": "可拖拽工具台模块信息",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 10000035593,
+      "alias": "告警记录表",
+      "name": "wt_bas_alarmrecord",
+      "path": "wt_bas_alarmrecord",
+      "description": "告警记录表，记录各种告警信息",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000035389,
+      "alias": "事件规则基础模型",
+      "name": "wt_1_shijianjichumoxing",
+      "path": "wt_1_shijianjichumoxing",
+      "description": "处理事件和消息的基本判断规则定义。如：报警事件规则，定时事件，预警事件等。",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000034707,
+      "alias": "人员外包合同",
+      "name": "wt_1_renyuanwaibaohetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_renyuanwaibaohetong",
+      "description": "处理劳务，技术人员的外包合同内容",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000035195,
+      "alias": "新闻公告基础模型",
+      "name": "wt_1_xinwengonggaojichumoxing_b8939c6d",
+      "path": "wt_1_xinwengonggaojichumoxing_b8939c6d",
+      "description": "处理单位新闻和公告的基础信息。用于 网站新闻和企业内部外部公告通知发布",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000034996,
+      "alias": "业务干系人模型",
+      "name": "wt_1_yewuganxirenmoxing",
+      "path": "wt_bas_users/wt_1_yewuganxirenmoxing",
+      "description": "外单位和本单位业务的相关人员，如：介绍人，项目合作人，信息提供人，业主，合作伙伴等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000000491,
+      "alias": "产品分类模型",
+      "name": "wt_elm_productclassify",
+      "path": "wt_elm_productclassify",
+      "description": "存贮产品的分类信息",
+      "tag": "物料和产品"
+    },
+    {
+      "id": 10000000493,
+      "alias": "产品基础模型",
+      "name": "wt_elm_product",
+      "path": "wt_elm_product",
+      "description": "存贮产品的基础信息",
+      "tag": "物料和产品"
+    },
+    {
+      "id": 501727612899328,
+      "alias": "党团组织模型",
+      "name": "wt_elm_partyunit",
+      "path": "wt_elm_organization/wt_elm_partyunit",
+      "description": "存贮党组织或者共青团组织的基本信息",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034398,
+      "alias": "仓库基础模型",
+      "name": "wt_elm_storagespace",
+      "path": "wt_elm_storagespace",
+      "description": "存贮单位不同类型的仓储空间的信息。如：库房，周转空间，临时库房等",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 10000001993,
+      "alias": "供应商单位模型",
+      "name": "wt_elm_supplier_user",
+      "path": "wt_elm_organization/wt_elm_unit/wt_elm_supplier_user",
+      "description": "存贮和本单位有业务往来的供应商的单位信息",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 846865044344832,
+      "alias": "图片量模型",
+      "name": "wt_iot_imagetag",
+      "path": "wt_iot_tags/wt_iot_imagetag",
+      "description": "存贮图片变量的基本属性",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 846423048589312,
+      "alias": "字串量模型",
+      "name": "wt_iot_stringtag",
+      "path": "wt_iot_tags/wt_iot_stringtag",
+      "description": "存贮字符串变量的基本属性",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 947121613213696,
+      "alias": "应用商店模型",
+      "name": "wt_bas_appstore",
+      "path": "wt_bas_appstore",
+      "description": "存贮应用商店中的模块信息",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 819474297262080,
+      "alias": "建筑本体模型",
+      "name": "wt_elm_buildingbody",
+      "path": "wt_elm_basic_building/wt_elm_buildingbody",
+      "description": "存贮建筑物本体的基础数据。归属园区，1对多的关系",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 819847388991488,
+      "alias": "建筑楼层模型",
+      "name": "wt_elm_buildinglayer",
+      "path": "wt_elm_basic_building/wt_elm_buildinglayer",
+      "description": "存贮建筑物楼层信息。归属建筑物本体，1对多关系。",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 10000000389,
+      "alias": "建筑基础模型",
+      "name": "wt_elm_basic_building",
+      "path": "wt_elm_basic_building",
+      "description": "存贮建筑物的基本属性",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 820255612211200,
+      "alias": "建筑空间模型",
+      "name": "wt_elm_buildingspace",
+      "path": "wt_elm_basic_building/wt_elm_buildingspace",
+      "description": "存贮建筑物空间(房间,公共空间)的信息。归属建筑楼层，1对多关系",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 846116537241600,
+      "alias": "数字量模型",
+      "name": "wt_iot_digitaltag",
+      "path": "wt_iot_tags/wt_iot_digitaltag",
+      "description": "存贮数字量的基本属性",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 847126567587840,
+      "alias": "文件量模型",
+      "name": "wt_iot_filetag",
+      "path": "wt_iot_tags/wt_iot_filetag",
+      "description": "存贮文件型变量的基本属性",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 10000003189,
+      "alias": "行业协会模型",
+      "name": "wt_elm_association",
+      "path": "wt_elm_organization/wt_elm_association",
+      "description": "存贮本单位参与的各类行业协会的基本属性和关联方式",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 1090000000789,
+      "alias": "模拟量模型",
+      "name": "wt_iot_analogtag",
+      "path": "wt_iot_tags/wt_iot_analogtag",
+      "description": "存贮模拟量的所有属性",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 13330951278592,
+      "alias": "用户人员基础模型",
+      "name": "wt_bas_users",
+      "path": "wt_bas_users",
+      "description": "存贮注册用户的基本类型数据，这些用户可以是本单位的职工，也可以是外部的用户",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000000490,
+      "alias": "物料分类模型",
+      "name": "wt_elm_meterialclassify",
+      "path": "wt_elm_meterialclassify",
+      "description": "存贮物料的分类信息",
+      "tag": "物料和产品"
+    },
+    {
+      "id": 10000000489,
+      "alias": "物料基础模型",
+      "name": "wt_elm_meterial",
+      "path": "wt_elm_meterial",
+      "description": "存贮生产和检修等的材料属性",
+      "tag": "物料和产品"
+    },
+    {
+      "id": 334886285119488,
+      "alias": "园区模型",
+      "name": "wt_elm_park",
+      "path": "wt_elm_basic_building/wt_elm_park",
+      "description": "存贮生产，生活园区的基本属性。如：工业园，医院，学校，厂区等",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 10000034721,
+      "alias": "图书模型",
+      "name": "wt_1_tushumoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_tushumoxing",
+      "description": "存贮用户图书类信息的主要信息。如：专著，小说等",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000024889,
+      "alias": "科研过程模型",
+      "name": "wt_elm_researchprocess",
+      "path": "wt_elm_researchprocess",
+      "description": "存贮科研过程的信息内容模型",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 125434841010176,
+      "alias": "部门模型",
+      "name": "wt_elm_department",
+      "path": "wt_elm_organization/wt_elm_department",
+      "description": "存贮管理本单位二级部门的基本属性，如：科室，部门，中心等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 847375235289088,
+      "alias": "视频量模型",
+      "name": "wt_iot_videotag",
+      "path": "wt_iot_tags/wt_iot_videotag",
+      "description": "存贮视频变量的所有模型",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 10000036631,
+      "alias": "市政公共基础模型",
+      "name": "wt_1_shizhenggonggongjichumoxing",
+      "path": "wt_elm_assetdetail/wt_1_shizhenggonggongjichumoxing",
+      "description": "市政公共基础模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000003497,
+      "alias": "应用app分类模型",
+      "name": "wt_bas_appclassify",
+      "path": "wt_bas_appclassify",
+      "description": "应用app分类模型",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 10000034989,
+      "alias": "开会模型",
+      "name": "wt_1_kaihuimoxing",
+      "path": "wt_1_kaihuimoxing",
+      "description": "开会模型",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034712,
+      "alias": "战略合作项目模型",
+      "name": "wt_1_zhanlvehezuoxiangmumoxing",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_1_zhanlvehezuoxiangmumoxing",
+      "description": "战略合作项目与重要伙伴建立长期战略合作关系的信息管理",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000034715,
+      "alias": "制度规范基础模型",
+      "name": "wt_1_zhiduguifanjichumoxing",
+      "path": "wt_1_zhiduguifanjichumoxing",
+      "description": "按照制度个规范的一般性原则存贮的基础数据。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 119701760479232,
+      "alias": "岗位模型",
+      "name": "wt_elm_post",
+      "path": "wt_elm_post",
+      "description": "描述职工的在职岗位字典",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000038776,
+      "alias": "计划子任务指标项模型",
+      "name": "wt_1_jihuazhibiaoxiangmoxing",
+      "path": "wt_1_jihuazhibiaoxiangmoxing",
+      "description": "提供一个计划或子任务的量化分解指标考察项目。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000035396,
+      "alias": "文章知识分组模型",
+      "name": "wt_1_wenzhangzhishifenzumoxing",
+      "path": "wt_1_wenzhangzhishifenzumoxing",
+      "description": "提供树形的针对文档和知识的关联分组。",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000036633,
+      "alias": "政府储备物资模型",
+      "name": "wt_1_zhengfuchubeiwuzimoxing",
+      "path": "wt_elm_assetdetail/wt_1_zhengfuchubeiwuzimoxing",
+      "description": "政府储备物资模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036605,
+      "alias": "文物资源明细模型",
+      "name": "wt_1_wenwuziyuanmingximoxing",
+      "path": "wt_elm_assetdetail/wt_1_wenwuziyuanmingximoxing",
+      "description": "文物资源明细模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000034992,
+      "alias": "档案卷宗模型",
+      "name": "wt_1_danganjuanzongmoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_danganjuanzongmoxing",
+      "description": "案卷是档案保管的最小单元，由若干文件组成。对应传统档案的“卷”",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000036630,
+      "alias": "水利公共基础设施明细模型",
+      "name": "wt_1_shuiligonggongjichusheshimingximoxing",
+      "path": "wt_elm_assetdetail/wt_1_shuiligonggongjichusheshimingximoxing",
+      "description": "水利公共基础设施明细模型",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000035892,
+      "alias": "流程人工补偿任务模型",
+      "name": "wt_bas_workflow_process_compensate_job",
+      "path": "wt_bas_workflow_process_compensate_job",
+      "description": "流程人工补偿任务模型",
+      "tag": "流程管理"
+    },
+    {
+      "id": 10000035894,
+      "alias": "流程处理审计日志模型",
+      "name": "wt_bas_workflow_process_audit_log",
+      "path": "wt_bas_workflow_process_audit_log",
+      "description": "流程人工补偿任务模型",
+      "tag": "流程管理"
+    },
+    {
+      "id": 10000035895,
+      "alias": "流程规则关联模型",
+      "name": "wt_bas_workflow_model_relation",
+      "path": "wt_bas_workflow_model_relation",
+      "description": "流程规则关联模型",
+      "tag": "流程管理"
+    },
+    {
+      "id": 10000035893,
+      "alias": "流程规则模型",
+      "name": "wt_bas_workflow_model_rule",
+      "path": "wt_bas_workflow_model_rule",
+      "description": "流程规则模型",
+      "tag": "流程管理"
+    },
+    {
+      "id": 10000034699,
+      "alias": "可选字典基础模型",
+      "name": "wt_1_kexuanzidianjichumoxing",
+      "path": "wt_1_kexuanzidianjichumoxing",
+      "description": "满足各类应用相关的字典型数据的基础模型",
+      "tag": "其他"
+    },
+    {
+      "id": 10000038787,
+      "alias": "工单指令基础模型",
+      "name": "wt_1_gongdanzhilingjichumoxing",
+      "path": "wt_1_gongdanzhilingjichumoxing",
+      "description": "用于描述各类工单的基础信息，如生产工单，检修工单，运维工单等。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000038831,
+      "alias": "日程图层模型",
+      "name": "wt_bas_schedulecategory",
+      "path": "wt_bas_schedulecategory",
+      "description": "用于日程组件中图层分类数据",
+      "tag": "其他"
+    },
+    {
+      "id": 10000034720,
+      "alias": "基本文档模型",
+      "name": "wt_1_jibenwendangmoxing",
+      "path": "wt_1_jibenwendangmoxing",
+      "description": "用于管理用户文档类的关键信息数据。如：图书文档，资料，设计图纸等。",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000039071,
+      "alias": "用户自定义应用",
+      "name": "wt_bas_user_custom_app",
+      "path": "wt_bas_user_custom_app",
+      "description": "用户自定义应用",
+      "tag": "其他"
+    },
+    {
+      "id": 678173141372928,
+      "alias": "公用字典模型",
+      "name": "meta_dictionarytree",
+      "path": "meta_dictionarytree",
+      "description": "用树形存贮当前公用的字典信息以供查询",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 10000034705,
+      "alias": "战略合作协议",
+      "name": "wt_1_zhanlvehezuoxieyi",
+      "path": "wt_1_jichuhetongmoxing/wt_1_zhanlvehezuoxieyi",
+      "description": "签署战略合作协议的内容",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000035196,
+      "alias": "项目文档模型",
+      "name": "wt_1_xiangmuwendangmoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_xiangmuwendangmoxing",
+      "description": "管理一个工程项目或者科研项目的过程文档资料。如：水利项目文档",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 110406146461696,
+      "alias": "企业单位模型",
+      "name": "wt_elm_unit",
+      "path": "wt_elm_organization/wt_elm_unit",
+      "description": "管理一个独立法人单位的基本信息。如：集团公司，集团二级企业，学校，企业或者医院等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034399,
+      "alias": "项目基础模型",
+      "name": "wt_1_gongchengxiangmujichumoxing",
+      "path": "wt_1_gongchengxiangmujichumoxing",
+      "description": "管理一个项目全生命周期的主要要素，可以是一个工程，也可以是一个科研项目等。",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000038786,
+      "alias": "预算明细模型",
+      "name": "wt_1_yusuanmingximoxing",
+      "path": "wt_1_yusuanmingximoxing",
+      "description": "管理一个预算的分解明细项目。如：费用分摊",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000033098,
+      "alias": "仓库储位模型",
+      "name": "wt_elm_warehouse_storage",
+      "path": "wt_elm_warehouse_storage",
+      "description": "管理仓库中各个储位空间的信息，可以是货架也可以是露天一块空间",
+      "tag": "环境和安全"
+    },
+    {
+      "id": 10000038784,
+      "alias": "资金预算决算模型",
+      "name": "wt_1_zijinyusuanjuesuanmoxing",
+      "path": "wt_1_zijinyusuanjuesuanmoxing",
+      "description": "管理企业运营中每一项业务的预算和决算执行情况。如：工程预决算，科研预决算，会议预决算。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000035394,
+      "alias": "制度规则条目模型",
+      "name": "wt_1_zhiduguizetiaomumoxing",
+      "path": "wt_1_zhiduguizetiaomumoxing",
+      "description": "管理制度规则的具体条目。如：考勤规则的上下班约定，工作计划的提交时间约定等。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000034710,
+      "alias": "系统集成项目模型",
+      "name": "wt_1_xitongjichengxiangmumoxing",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_1_xitongjichengxiangmumoxing",
+      "description": "管理包含软硬件安装实施的系统集成类项目的主要信息",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 10000034704,
+      "alias": "合作开发合同模型",
+      "name": "wt_1_hezuokaifahetongmoxing",
+      "path": "wt_1_jichuhetongmoxing/wt_1_hezuokaifahetongmoxing",
+      "description": "管理单位和其他单位合作开发项目的内容",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000038774,
+      "alias": "工作计划模型",
+      "name": "wt_1_gongzuojihuamoxing",
+      "path": "wt_1_gongzuojihuamoxing",
+      "description": "管理单位部门和个人的工作计划。树形结构。例如：公司年度计划 → 部门季度计划 → 个人月度计划 → 具体任务",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000003190,
+      "alias": "业务关联单位模型",
+      "name": "wt_elm_coherentunit",
+      "path": "wt_elm_organization/wt_elm_coherentunit",
+      "description": "管理和存贮和本单位有关联关系的其他单位，如：主管上级，高校，科研机构，合作伙伴等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034396,
+      "alias": "外部合作专家模型",
+      "name": "wt_elm_relationperson",
+      "path": "wt_bas_users/wt_elm_relationperson",
+      "description": "管理和本单位业务提供咨询，指导的相关人员信息，如：外聘专家，技术顾问等。算是本单位的不在编职工",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034993,
+      "alias": "图书丛书分券模型",
+      "name": "wt_1_tushucongshufenquanmoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_tushucongshufenquanmoxing",
+      "description": "管理图书的卷册以及丛书的属性信息，可以关联图书模型",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000034397,
+      "alias": "客户单位模型",
+      "name": "wt_elm_groupuserunit",
+      "path": "wt_elm_organization/wt_elm_unit/wt_elm_groupuserunit",
+      "description": "管理客户单位的信息。如：项目业主，甲方单位等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000011489,
+      "alias": "职工基础模型",
+      "name": "wt_elm_employees",
+      "path": "wt_bas_users/wt_elm_employees",
+      "description": "管理当前单位职工的全量信息",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000023589,
+      "alias": "用户群组模型",
+      "name": "wt_bas_usergroup",
+      "path": "wt_bas_usergroup",
+      "description": "管理所有人员的个性化分组的信息，如：单位职工兴趣小组，供应商和集成商整合分组等。",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 37519356071936,
+      "alias": "资产基础模型",
+      "name": "wt_elm_asset",
+      "path": "wt_elm_asset",
+      "description": "管理所有目标的资产信息。按照国标进行分类。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 948972859068416,
+      "alias": "设备基础模型",
+      "name": "wt_elm_equipment",
+      "path": "wt_elm_equipment",
+      "description": "管理机电设备，智能设备的主要基础信息。如：计算机，机床，PLC等",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 845503480991744,
+      "alias": "测点基础模型",
+      "name": "wt_iot_tags",
+      "path": "wt_iot_tags",
+      "description": "管理测量点的公共基础属性。",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 10000034723,
+      "alias": "档案全宗模型",
+      "name": "wt_1_danganquanzongmoxing",
+      "path": "wt_1_jibenwendangmoxing/wt_1_danganquanzongmoxing",
+      "description": "管理用户不同类型的档案全宗的信息，通过全宗可以关联卷宗",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000034717,
+      "alias": "器具用具基础模型",
+      "name": "wt_1_qijuyongjumoxing",
+      "path": "wt_1_qijuyongjumoxing",
+      "description": "管理用户业务中的普通物品。如：工具，家具，厨具等。",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000037195,
+      "alias": "软件基础模型",
+      "name": "wt_bas_software",
+      "path": "wt_bas_software",
+      "description": "管理用户的系统软件和应用软件数据",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034716,
+      "alias": "设施基础模型",
+      "name": "wt_1_sheshimoxing",
+      "path": "wt_1_sheshimoxing",
+      "description": "管理用户设施的基本信息。如：厂房，水渠，管网等。",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034400,
+      "alias": "研发项目模型",
+      "name": "wt_elm_researchproj",
+      "path": "wt_1_gongchengxiangmujichumoxing/wt_elm_researchproj",
+      "description": "管理科技研发项目的全周期属性。如：产品研发，软件研发，政府研发计划等",
+      "tag": "项目和工程"
+    },
+    {
+      "id": 109652216123392,
+      "alias": "组织基础模型",
+      "name": "wt_elm_organization",
+      "path": "wt_elm_organization",
+      "description": "管理组织的基本属性及架构，所有组织类的对象均继承自这个模型",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034995,
+      "alias": "职工社会关系模型",
+      "name": "wt_1_zhigongshehuiguanximoxing",
+      "path": "wt_1_zhigongshehuiguanximoxing",
+      "description": "管理职工的主要社会关系列表。如：直系亲属，其他重要的社会关系等内容",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000031190,
+      "alias": "资产分组模型",
+      "name": "wt_elm_assetclassify",
+      "path": "wt_elm_assetclassify",
+      "description": "管理资产的个性化分组。可以按照用户自己关注的内容进行分组关联",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000006289,
+      "alias": "角色模型",
+      "name": "wt_bas_role",
+      "path": "wt_bas_role",
+      "description": "组织或者给用户在项目中的角色",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034700,
+      "alias": "人员薪资结构模型",
+      "name": "wt_1_renyuanxinzijiegoumoxing",
+      "path": "wt_1_kexuanzidianjichumoxing/wt_1_renyuanxinzijiegoumoxing",
+      "description": "罗列出单位职工的薪资结构",
+      "tag": "其他"
+    },
+    {
+      "id": 10000008393,
+      "alias": "职务模型",
+      "name": "wt_bas_duties",
+      "path": "wt_bas_duties",
+      "description": "职务模型",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034706,
+      "alias": "专家顾问聘用合同",
+      "name": "wt_1_zhuanjiaguwenpinyonghetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_zhuanjiaguwenpinyonghetong",
+      "description": "聘请外部的专家或者顾问的主要信息",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000034708,
+      "alias": "产品销售合同",
+      "name": "wt_1_chanpinxiaoshouhetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_chanpinxiaoshouhetong",
+      "description": "自己生产的产品销售合同主要内容",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000025490,
+      "alias": "获奖模型",
+      "name": "wt_elm_getprise",
+      "path": "wt_elm_getprise",
+      "description": "获奖模型",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000038763,
+      "alias": "应聘面试过程模型",
+      "name": "wt_1_yingpinmianshiguochengmoxing",
+      "path": "wt_1_yingpinmianshiguochengmoxing",
+      "description": "记录一个职工的应聘面试的过程",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000038775,
+      "alias": "计划子任务执行过程",
+      "name": "wt_1_jihuazhixingguocheng",
+      "path": "wt_1_jihuazhixingguocheng",
+      "description": "记录一个计划或者子任务的执行日志",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000038785,
+      "alias": "预算执行过程模型",
+      "name": "wt_1_yusuanzhixingguochengmoxing",
+      "path": "wt_1_yusuanzhixingguochengmoxing",
+      "description": "记录一笔预算的执行过程中的节点。如：开始，执行，终止，超支等。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036649,
+      "alias": "其它固定资产模型",
+      "name": "wt_1_qitagudingzongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_qitagudingzongzichanmoxing",
+      "description": "记录不属于上述类别的其他有形固定资产。 例如：本单位的动物（如种畜）、植物（如名贵绿化林木）、艺术品及陈列品。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000029190,
+      "alias": "专家合作过程",
+      "name": "wt_elm_exexportcood",
+      "path": "wt_elm_exexportcood",
+      "description": "记录专家合作的过程信息",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000037920,
+      "alias": "政府储备物资资产模型",
+      "name": "wt_1_zhengfuchubeiwuzizichanmoxing",
+      "path": "wt_elm_asset/wt_1_zhengfuchubeiwuzizichanmoxing",
+      "description": "记录为保障国家安全或应对公共危机而储备的物资。 例如：本单位的救灾帐篷、应急发电机、防汛编织袋、医药储备药材。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000035390,
+      "alias": "事件记录基础模型",
+      "name": "wt_1_shijianjilujichumoxing",
+      "path": "wt_1_shijianjilujichumoxing",
+      "description": "记录事件过程数据的模型。如：报警记录，突发动作记录等",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000038772,
+      "alias": "资质和证书模型",
+      "name": "wt_1_zizhihezhengshumoxing",
+      "path": "wt_1_zizhihezhengshumoxing",
+      "description": "记录企业或个人获得的资质和证书情况。如：建造师，ISO9000,CMMI等",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000038769,
+      "alias": "会议模型",
+      "name": "wt_1_huiyimoxing",
+      "path": "wt_1_huiyimoxing",
+      "description": "记录单位举办的所有会议。如：总经理办公会、部门周例会、职工代表大会、项目评审会。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000036648,
+      "alias": "车辆资产模型",
+      "name": "wt_1_cheliangzongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_cheliangzongzichanmoxing",
+      "description": "记录单位名下的各类机动运输工具。 例如：本单位的商务通勤车、货运卡车、公务轿车、特种作业车辆。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036654,
+      "alias": "成交历史模型",
+      "name": "wt_1_chengjiaolishimoxing",
+      "path": "wt_1_chengjiaolishimoxing",
+      "description": "记录单位和客户的过往成交历史",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000035392,
+      "alias": "通知行为记录模型",
+      "name": "wt_1_tongzhixingweijilumoxing",
+      "path": "wt_1_shijianjilujichumoxing/wt_1_tongzhixingweijilumoxing",
+      "description": "记录发送通知类的行为记录.短信，邮件，启动流程等",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000036646,
+      "alias": "房屋资产模型",
+      "name": "wt_1_fangwuzongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_fangwuzongzichanmoxing",
+      "description": "记录各类建筑物及附属设施。 例如：本单位的办公楼、生产车间、职工食堂、仓库用房。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036647,
+      "alias": "设备及家具资产模型",
+      "name": "wt_1_shebeijijiajuzongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_shebeijijiajuzongzichanmoxing",
+      "description": "记录各类生产设备、办公设备及办公家具。 例如：本单位的数控机床、服务器、空调、办公桌椅、文件柜。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037922,
+      "alias": "在建工程资产模型",
+      "name": "wt_1_zaijiangongchengzichanmoxing",
+      "path": "wt_elm_asset/wt_1_zaijiangongchengzichanmoxing",
+      "description": "记录尚未完工或未办理竣工决算的建设项目投入。 例如：本单位正在施工中的新厂房扩建工程、研发中心大楼基坑项目。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000038762,
+      "alias": "党团员模型",
+      "name": "wt_1_dangtuanyuanmoxing",
+      "path": "wt_bas_users/wt_elm_employees/wt_1_dangtuanyuanmoxing",
+      "description": "记录当前职工的党团组织信息",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 1000000032913,
+      "alias": "设备报修过程模型",
+      "name": "wt_iot_repair_requests",
+      "path": "wt_iot_repair_requests",
+      "description": "记录当前设备的报修过程。",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000037919,
+      "alias": "其他公共基础设施资产模型",
+      "name": "wt_1_qitagonggongjichusheshizichanmoxing",
+      "path": "wt_elm_asset/wt_1_qitagonggongjichusheshizichanmoxing",
+      "description": "记录未列明但符合公共基础设施定义的其他设施。 例如：本单位管辖的公共体育场草坪维护系统、大型户外广告设施框架。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036656,
+      "alias": "数据资产模型",
+      "name": "wt_1_zongshujuzichanmoxing",
+      "path": "wt_elm_asset/wt_1_zongshujuzichanmoxing",
+      "description": "记录本单位拥有和控制的数据资源。 例如：本单位的客户行为数据集、生产IoT传感器积累的工况数据库、三维设计图纸库。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036645,
+      "alias": "土地资产模型",
+      "name": "wt_1_tudizongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_tudizongzichanmoxing",
+      "description": "记录本单位拥有或占用的土地使用权及宗地信息。 例如：本单位的厂区用地、办公楼占地、未开发储备地块。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037921,
+      "alias": "保障性住房资产模型",
+      "name": "wt_1_baozhangxingzhufangzichanmoxing",
+      "path": "wt_elm_asset/wt_1_baozhangxingzhufangzichanmoxing",
+      "description": "记录本单位持有或管理的保障性住房及配套商业设施。 例如：本单位管理的人才公寓、公租房小区、配套商铺。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037923,
+      "alias": "长期投资资产模型",
+      "name": "wt_1_changqitouzizichanmoxing",
+      "path": "wt_elm_asset/wt_1_changqitouzizichanmoxing",
+      "description": "记录本单位持有的期限超过一年的股权投资或债权投资。 例如：本单位持有的被投资企业股权、购买的长期国债、投资基金份额",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000036655,
+      "alias": "专利及无形资产模型",
+      "name": "wt_1_zongwuxingzichanmoxing",
+      "path": "wt_elm_asset/wt_1_zongwuxingzichanmoxing",
+      "description": "记录本单位持有的非实物形态的知识产权类资产。 例如：本单位的发明专利证书、实用新型专利、外购的软件系统使用权。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037194,
+      "alias": "文物资源资产模型",
+      "name": "wt_1_zongwenwuziyuanzichanmoxing",
+      "path": "wt_elm_asset/wt_1_zongwenwuziyuanzichanmoxing",
+      "description": "记录本单位管理或拥有的不可移动及可移动文物。 例如：本单位管理的古建筑遗址、馆藏珍贵青铜器、石刻碑碣。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000038764,
+      "alias": "专利和知识产权模型",
+      "name": "wt_1_zhuanlihezhishichanquanmoxing",
+      "path": "wt_1_zhuanlihezhishichanquanmoxing",
+      "description": "记录本单位获得的专利和无形资产内容",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000037192,
+      "alias": "交通公共基础设施资产模型",
+      "name": "wt_1_zonggonggongjiaotongzichanmoxing",
+      "path": "wt_elm_asset/wt_1_zonggonggongjiaotongzichanmoxing",
+      "description": "记录本单位负责管养的交通类公共设施（如有相关管养职能）。 例如：本单位管养的责任段国省道公路、桥梁、隧道、航道设施。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037918,
+      "alias": "市政公共基础资产模型",
+      "name": "wt_1_shizhenggonggongjichuzichanmoxing",
+      "path": "wt_elm_asset/wt_1_shizhenggonggongjichuzichanmoxing",
+      "description": "记录本单位负责管养的城市公共配套设施。 例如：本单位管养的城市道路照明路灯、绿化带、公共广场铺装、地下综合管廊。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000037193,
+      "alias": "水利公共基础设施资产模型",
+      "name": "wt_1_zongshuiligonggongjichusheshizichanmoxing",
+      "path": "wt_elm_asset/wt_1_zongshuiligonggongjichusheshizichanmoxing",
+      "description": "记录本单位负责管养的水利设施。 例如：本单位管辖的水库大坝、灌溉渠系、排涝泵站、防洪堤防。",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000035391,
+      "alias": "测点报警预警模型",
+      "name": "wt_1_cedianbaojingjilumoxing",
+      "path": "wt_1_shijianjilujichumoxing/wt_1_cedianbaojingjilumoxing",
+      "description": "记录测点报警和预警的数字记录过程",
+      "tag": "事件和消息"
+    },
+    {
+      "id": 10000032224,
+      "alias": "组织历史沿革模型",
+      "name": "wt_elm_orghistory",
+      "path": "wt_elm_orghistory",
+      "description": "记录组织的历史演变过程",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000032389,
+      "alias": "组织事件模型",
+      "name": "wt_elm_orgevent",
+      "path": "wt_elm_orgevent",
+      "description": "记录组织的重大事件。如: 奖励。重大成果等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 1060000028791,
+      "alias": "职工工作经历模型",
+      "name": "wt_fac_career",
+      "path": "wt_fac_career",
+      "description": "记录职工全部的工作经历。包含在本单位以外的经历",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 1060000028790,
+      "alias": "职工异动过程模型",
+      "name": "wt_fac_changeposition",
+      "path": "wt_fac_changeposition",
+      "description": "记录职工工作异动过程，如调岗，除名，借调，进修，离职等",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000035491,
+      "alias": "职工学习过程模型",
+      "name": "wt_1_zhigongxuexiguochengmoxing",
+      "path": "wt_1_zhigongxuexiguochengmoxing",
+      "description": "记录职工的求学过程。可以从高中开始",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000035003,
+      "alias": "职工考勤过程模型",
+      "name": "wt_fac_onduty",
+      "path": "wt_fac_onduty",
+      "description": "记录职工的缺勤的过程。",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000038777,
+      "alias": "计划子任务变更过程模型",
+      "name": "wt_1_jihuabiangengguochengmoxing",
+      "path": "wt_1_jihuabiangengguochengmoxing",
+      "description": "记录计划或子任务的变更过程说明。如变更内容，变更指标，变更时段，变更负责人等。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 10000034410,
+      "alias": "设备点检过程模型",
+      "name": "wt_1_shebeidianjianguochengmoxing",
+      "path": "wt_iot_work_orders/wt_1_shebeidianjianguochengmoxing",
+      "description": "记录设备全生命周期中点检的过程",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034416,
+      "alias": "设备维修过程模型",
+      "name": "wt_1_shebeiweixiuguochengmoxing",
+      "path": "wt_iot_work_orders/wt_1_shebeiweixiuguochengmoxing",
+      "description": "记录设备全生命周期中的维修信息",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034411,
+      "alias": "设备巡检过程模型",
+      "name": "wt_1_shebeixunjianguochengmoxing",
+      "path": "wt_iot_work_orders/wt_1_shebeixunjianguochengmoxing",
+      "description": "记录设备全部的巡检过程",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034415,
+      "alias": "设备保养过程模型",
+      "name": "wt_1_shebeibaoyangguochengmoxing",
+      "path": "wt_iot_work_orders/wt_1_shebeibaoyangguochengmoxing",
+      "description": "记录设备的全生命周期中的保养过程",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000031294,
+      "alias": "资产处置记录模型",
+      "name": "wt_elm_assethandle",
+      "path": "wt_elm_assethandle",
+      "description": "记录资产的处置记录。例如：出售，转让，移动等",
+      "tag": "资本和资产"
+    },
+    {
+      "id": 10000038773,
+      "alias": "资质证书审核过程模型",
+      "name": "wt_1_zizhizhengshushenheguochengmoxing",
+      "path": "wt_1_zizhizhengshushenheguochengmoxing",
+      "description": "记录资质证书审核过程。如：获取，年审，临检等。",
+      "tag": "制度和规范"
+    },
+    {
+      "id": 1060000031432,
+      "alias": "设备巡检方案模型",
+      "name": "wt_elm_equipinspectscheme",
+      "path": "wt_elm_equipinspectscheme",
+      "description": "设备巡检方案模型",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034709,
+      "alias": "设备材料采购合同",
+      "name": "wt_1_shebeicailiaocaigouhetong",
+      "path": "wt_1_jichuhetongmoxing/wt_1_shebeicailiaocaigouhetong",
+      "description": "设备材料采购合同的主要指标",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000038768,
+      "alias": "课程讲师模型",
+      "name": "wt_1_kechengjiangshimoxing",
+      "path": "wt_1_kechengjiangshimoxing",
+      "description": "课程讲师模型",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 10000039065,
+      "alias": "跨租户委托授权",
+      "name": "wt_bas_tenant_delegation",
+      "path": "wt_bas_tenant_delegation",
+      "description": "跨租户委托授权",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000039066,
+      "alias": "跨租户访问审计",
+      "name": "wt_bas_tenant_access_audit",
+      "path": "wt_bas_tenant_access_audit",
+      "description": "跨租户访问审计",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000038744,
+      "alias": "通用指标统计快照表",
+      "name": "wt_1_tongyongzhibiaotongjikuaizhaobiao",
+      "path": "wt_1_tongyongzhibiaotongjikuaizhaobiao",
+      "description": "通用指标统计快照表",
+      "tag": "其他"
+    },
+    {
+      "id": 645411384627200,
+      "alias": "测点分组模型",
+      "name": "wt_iot_tagclassify",
+      "path": "wt_iot_tagclassify",
+      "description": "采用树形结构管理个性化的测点分组。",
+      "tag": "网关和数采"
+    },
+    {
+      "id": 759383567929344,
+      "alias": "设备分组模型",
+      "name": "wt_elm_devclassify",
+      "path": "wt_elm_devclassify",
+      "description": "采用树形结构管理设备的个性化分组，以便于查询",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000034695,
+      "alias": "合同基础模型",
+      "name": "wt_1_jichuhetongmoxing",
+      "path": "wt_1_jichuhetongmoxing",
+      "description": "针对所有合同的最基础信息，是所有合同基本模型",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 1000000032898,
+      "alias": "基础运维过程基础模型",
+      "name": "wt_iot_work_orders",
+      "path": "wt_iot_work_orders",
+      "description": "针对设备的基本巡检，保养，维修，点检的基础信息信息处理。作为具体过程基本模型",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000039064,
+      "alias": "集团层级作用域",
+      "name": "wt_bas_tenant_group_closure",
+      "path": "wt_bas_tenant_group_closure",
+      "description": "集团层级闭包表",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000039063,
+      "alias": "集团成员表",
+      "name": "wt_bas_tenant_group_member",
+      "path": "wt_bas_tenant_group_member",
+      "description": "集团成员表",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000039062,
+      "alias": "租户集团表",
+      "name": "wt_bas_tenant_group",
+      "path": "wt_bas_tenant_group",
+      "description": "集团租户与授权切换",
+      "tag": "组织和人员"
+    },
+    {
+      "id": 10000034703,
+      "alias": "进度里程碑模型",
+      "name": "wt_1_jindulichengbeimoxing",
+      "path": "wt_1_jindulichengbeimoxing",
+      "description": "项目，合同的实施，付款里程碑信息",
+      "tag": "文档和知识"
+    },
+    {
+      "id": 1000000033221,
+      "alias": "设备点检项目字典模型",
+      "name": "wt_iot_eq_check_item_dict",
+      "path": "wt_iot_eq_check_item_dict",
+      "description": "预置点检的基本标准参数个检查内容",
+      "tag": "设备和设施"
+    },
+    {
+      "id": 10000019089,
+      "alias": "预警条件模型",
+      "name": "wt_bas_warn_condition",
+      "path": "wt_bas_warn_condition",
+      "description": "预警条件模型",
+      "tag": "基础系统支撑"
+    },
+    {
+      "id": 10000019090,
+      "alias": "预警配置模型",
+      "name": "wt_bas_warn_config",
+      "path": "wt_bas_warn_config",
+      "description": "预警配置模型",
+      "tag": "基础系统支撑"
+    }
+  ],
+  "dataModels": []
+}

@@ -14,9 +14,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { AskdataService } from '../index.ts'
-import type { ToolContext } from '../../tools/index.ts'
+import type { ToolContext, AskdataTool } from '../../tools/index.ts'
+import type { AskdataApiTool } from '../../tools-api/index.ts'
+import type { ApiToolContext } from '../../tools-api/types.ts'
 import z from 'schemastery'
-import { adaptAskdataTool, type AskdataToolDefinition } from './adapter.ts'
+import { adaptAskdataTool, adaptAskdataApiTool, type AskdataToolDefinition } from './adapter.ts'
 
 /** Cordis 插件名（诊断用）。 */
 export const name = 'askdata-tools'
@@ -28,7 +30,7 @@ export const inject = ['tools', 'askdata']
 export const Config = z.object({})
 
 /**
- * 注册全部工具（P0 + P1）。每个 AskdataTool 适配为 DSH 工具定义；取消信号与
+ * 注册全部工具（P0 + P1 + API P0）。每个 AskdataTool 适配为 DSH 工具定义；取消信号与
  * 审计链游标在每次调用时注入工具上下文。
  *
  * `ctx.tools` 由 DSH 宿主的 tools 服务合并进 Context（@deepseek-ai/dsh-tools
@@ -40,8 +42,9 @@ export function apply(ctx: Context): void {
   const service: AskdataService = host.askdata
   let prevAuditHash = ''
 
+  // 注册 SQL 工具
   for (const tool of service.tools) {
-    const definition: AskdataToolDefinition = adaptAskdataTool(tool, (signal?: AbortSignal): ToolContext => {
+    const definition: AskdataToolDefinition = adaptAskdataTool(tool as AskdataTool, (signal?: AbortSignal): ToolContext => {
       const toolContext = service.createContext({
         prevAuditHash,
         signal,
@@ -52,5 +55,21 @@ export function apply(ctx: Context): void {
       return toolContext
     })
     host.tools.register(definition)
+  }
+
+  // 注册 API 工具（新 API 网关）
+  if (service.apiTools) {
+    for (const tool of service.apiTools) {
+      const definition: AskdataToolDefinition = adaptAskdataApiTool(tool, (signal?: AbortSignal): ApiToolContext => {
+        return service.createApiContext({
+          prevAuditHash,
+          signal,
+          onAudit: (row) => {
+            prevAuditHash = row.resultHash
+          },
+        })
+      })
+      host.tools.register(definition)
+    }
   }
 }

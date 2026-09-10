@@ -10,13 +10,16 @@
  * @module
  */
 
-import { resolveConfig, type AskdataConfig, type StarRocksConnection, type MysqlConnection, type QueryConfig } from './config.ts'
+import { resolveConfig, type AskdataConfig, type StarRocksConnection, type MysqlConnection, type QueryConfig, type ApiConfig } from './config.ts'
 import { executeQuery } from './clients/starrocks.ts'
 import { executeQueryViaMysql2 } from './clients/starrocks-mysql2.ts'
 import { executeQueryViaMysql } from './clients/mysql-mysql2.ts'
 import { randomUUID } from 'node:crypto'
 import { allTools } from '../tools/index.ts'
+import { apiTools } from '../tools-api/index.ts'
 import type { AskdataTool, SqlExecutor, ToolContext } from '../tools/index.ts'
+import type { AskdataApiTool, ApiToolContext } from '../tools-api/index.ts'
+import { ApiClient } from './api/client.ts'
 import type { AuditRow } from './audit.ts'
 import { assertSafeToExecute } from './sql/whitelist.ts'
 import { askdataError } from './errors.ts'
@@ -24,14 +27,22 @@ import { askdataError } from './errors.ts'
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（P0 五工具 + P1 六工具，共 11 个）。 */
+  /** 全部工具面（SQL P0 五工具 + P1 六工具 + API P0 八工具）。 */
   tools: AskdataTool[]
+  /** API 工具面（P0 八工具，新 API 网关）。 */
+  apiTools: AskdataApiTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
   createContext(options?: {
     prevAuditHash?: string
     signal?: AbortSignal
     onAudit?(row: AuditRow): void
   }): ToolContext
+  /** 构造一次 API 工具调用的上下文。 */
+  createApiContext(options?: {
+    prevAuditHash?: string
+    signal?: AbortSignal
+    onAudit?(row: AuditRow): void
+  }): ApiToolContext
 }
 
 /** 执行器包装：派发前强制过白名单闸门（服务级咽喉点，防御调用点遗漏）。 */
@@ -56,6 +67,7 @@ export function createAskdataService(input: {
   appId?: number
   tables?: Partial<AskdataConfig['tables']>
   query?: Partial<QueryConfig>
+  api?: Partial<ApiConfig>
   system?: Partial<AskdataConfig['system']>
   security?: Partial<AskdataConfig['security']>
   audit?: Partial<AskdataConfig['audit']>
@@ -86,9 +98,14 @@ export function createAskdataService(input: {
     },
     config.security.tableWhitelist,
   )
+
+  // AGP REST API 客户端（新 API 网关）
+  const apiClient = new ApiClient(config.api)
+
   return {
     config,
     tools: allTools,
+    apiTools,
     createContext(options) {
       return {
         config,
@@ -98,6 +115,16 @@ export function createAskdataService(input: {
         prevAuditHash: options?.prevAuditHash,
         onAudit: options?.onAudit,
         log: (message) => console.log(`[askdata] ${message}`),
+      }
+    },
+    createApiContext(options) {
+      return {
+        config,
+        apiClient,
+        signal: options?.signal,
+        prevAuditHash: options?.prevAuditHash,
+        onAudit: options?.onAudit,
+        log: (message) => console.log(`[askdata-api] ${message}`),
       }
     },
   }

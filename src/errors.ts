@@ -18,6 +18,13 @@ export const ERROR_CODES = {
   OBJECT_NOT_FOUND: '设备/对象名未命中',
   TAG_DEFINITION_NOT_FOUND: '测点中文名未命中动态属性定义',
   TAG_NOT_REGISTERED: 'tagName 未在 wt_iot_tags 注册',
+  API_TIMEOUT: 'API 请求超时',
+  API_UNREACHABLE: 'API 不可达',
+  API_HTTP_ERROR: 'API HTTP 错误',
+  API_ERROR: 'API 内部错误',
+  AUTH_REQUIRED: 'API 未登录',
+  AUTH_EXPIRED: 'Token 已过期',
+  MODEL_NOT_FOUND: '模型未找到',
 } as const
 
 export type ErrorCode = keyof typeof ERROR_CODES
@@ -35,6 +42,13 @@ const RETRY_HINTS: Partial<Record<ErrorCode, string>> = {
   OBJECT_NOT_FOUND: '先用 lookup_object 查出正确设备名再重试',
   TAG_DEFINITION_NOT_FOUND: '先用 lookup_tag_definition 查出正确测点中文名再重试',
   TAG_NOT_REGISTERED: 'tagName 未在 wt_iot_tags 注册，检查粒度后缀或设备 id',
+  API_TIMEOUT: '检查网络后重试',
+  API_UNREACHABLE: '检查 API 地址后重试',
+  API_HTTP_ERROR: '检查请求参数后重试',
+  API_ERROR: '报错，等用户确认后端后重试',
+  AUTH_REQUIRED: '检查 Token 配置',
+  AUTH_EXPIRED: '重新获取 Token',
+  MODEL_NOT_FOUND: '先用 list_models 查出正确模型名再重试',
 }
 
 /** 取错误码对应的 LLM 处置提示。 */
