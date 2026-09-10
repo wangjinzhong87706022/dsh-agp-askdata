@@ -514,3 +514,27 @@ export function resolveTagStep5Sql(config: AskdataConfig, tagName: string): stri
     'LIMIT 1',
   ].join('\n')
 }
+
+/** lookup_device：查设备维度表（逆变器→组串→子阵层级；真实列为 inverter/array/sub 三级前缀命名，无 device 前缀列）。 */
+export function lookupDeviceSql(
+  config: AskdataConfig,
+  args: { keyword?: string; deviceType?: string; limit: number },
+): string {
+  const conditions: string[] = []
+  if (args.keyword) {
+    const kw = escapeLike(args.keyword)
+    conditions.push(
+      `(inverterName LIKE '%${kw}%' OR inverterCode LIKE '%${kw}%'`
+      + ` OR arrayName LIKE '%${kw}%' OR arrayCode LIKE '%${kw}%'`
+      + ` OR subName LIKE '%${kw}%' OR subCode LIKE '%${kw}%')`,
+    )
+  }
+  if (args.deviceType) conditions.push(`\`type\` = ${escapeSqlString(args.deviceType)}`)
+  return [
+    'SELECT inverterId, inverterName, inverterCode, arrayId, arrayName, arrayCode, subId, subName, subCode, `type`',
+    `FROM ${config.tables.device}`,
+    ...(conditions.length > 0 ? [`WHERE ${conditions.join('\n  AND ')}`] : []),
+    'ORDER BY inverterCode',
+    `LIMIT ${args.limit}`,
+  ].join('\n')
+}

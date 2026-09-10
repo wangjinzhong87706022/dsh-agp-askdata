@@ -26,21 +26,29 @@ export const modelAttributesTool: AskdataApiTool = {
     return runApiTool(modelAttributesTool, args, ctx, async () => {
       const modelName = String(args.model_name ?? '').trim()
       if (modelName === '') throw askdataError('INVALID_PARAM', 'model_name 必填')
-      const attrs = await ctx.apiClient.getModelAttributes(modelName)
       return {
-        path: `/wz/meta/getModelBasAttributes?modelName=${encodeURIComponent(modelName)}`,
-        params: { modelName },
-        fields: [
-          { name: 'field_name', title: '字段名', type: 'string' },
-          { name: 'field_description', title: '字段描述', type: 'string' },
-          { name: 'field_type', title: '字段类型', type: 'string' },
-        ],
-        shape: (rows) =>
-          rows.map((r) => ({
-            field_name: toString(r.field_name),
-            field_description: toString(r.field_description),
-            field_type: toString(r.field_type),
-          })),
+        request: {
+          path: '/wz/meta/getModelBasAttributes',
+          params: { modelName },
+        },
+        describe: (raw) => {
+          // 兼容两种响应形态：{field: [...]} 包装或属性数组直出
+          const rows = Array.isArray(raw)
+            ? (raw as Record<string, unknown>[])
+            : ((raw as { field?: Record<string, unknown>[] }).field ?? [])
+          return {
+            fields: [
+              { name: 'field_name', title: '字段名', type: 'string' },
+              { name: 'field_description', title: '字段描述', type: 'string' },
+              { name: 'field_type', title: '字段类型', type: 'string' },
+            ],
+            data: rows.map((r) => ({
+              field_name: toString(r.field_name),
+              field_description: toString(r.field_description),
+              field_type: toString(r.field_type),
+            })),
+          }
+        },
       }
     })
   },

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.ts'
 import type { QueryOutput } from '../src/clients/starrocks.ts'
 import type { SqlExecutor, ToolContext } from '../tools/types.ts'
-import { p0Tools, p1Tools, allTools } from '../tools/index.ts'
+import { p0Tools, p1Tools, schemaTools, allTools } from '../tools/index.ts'
 import { buildAuditRow, type AuditRow } from '../src/audit.ts'
 
 function testContext(
@@ -63,6 +63,9 @@ describe('工具注册表', () => {
       'query_alarm',
       'query_alarm_config',
     ])
+  })
+  it('结构验证阶段工具消费 WT_DEVICE', () => {
+    expect(schemaTools.map((t) => t.name)).toEqual(['lookup_device'])
   })
 })
 
@@ -542,6 +545,52 @@ describe('aggregate WT_CUBE 路由', () => {
     }, ctx)
     expect(result.success).toBe(true)
     expect(result.apiOrSql).toContain('FROM WT_DATA')
+  })
+})
+
+describe('lookup_device（WT_DEVICE 设备层级）', () => {
+  it('关键字命中返回层级行，id 数值化', async () => {
+    const { ctx } = testContext(
+      byIncludes([
+        ['FROM WT_DEVICE', {
+          columns: ['inverterId', 'inverterName', 'inverterCode', 'arrayId', 'arrayName', 'arrayCode', 'subId', 'subName', 'subCode', 'type'],
+          rows: [{
+            inverterId: '100620000015521', inverterName: '1号逆变器', inverterCode: 'INV001',
+            arrayId: '201', arrayName: '1号组串', arrayCode: 'ARR001',
+            subId: '301', subName: '1号子阵', subCode: 'SUB001',
+            type: 'inverter',
+          }],
+        }],
+      ]),
+    )
+    const result = await tool('lookup_device').run({ keyword: '逆变器' }, ctx)
+    expect(result.success).toBe(true)
+    expect(result.data[0]).toEqual({
+      inverterId: 100620000015521, inverterName: '1号逆变器', inverterCode: 'INV001',
+      arrayId: 201, arrayName: '1号组串', arrayCode: 'ARR001',
+      subId: 301, subName: '1号子阵', subCode: 'SUB001',
+      type: 'inverter',
+    })
+    expect(result.apiOrSql).toContain("inverterName LIKE '%逆变器%'")
+  })
+  it('device_type 精确过滤', async () => {
+    const { ctx } = testContext(
+      byIncludes([['FROM WT_DEVICE', { columns: ['inverterId'], rows: [] }]]),
+    )
+    const result = await tool('lookup_device').run({ device_type: 'array' }, ctx)
+    expect(result.success).toBe(true)
+    expect(result.apiOrSql).toContain("`type` = 'array'")
+    expect(result.apiOrSql).not.toContain('LIKE')
+  })
+  it('keyword 与 device_type 均缺省 → INVALID_PARAM（不触达执行器）', async () => {
+    let called = 0
+    const { ctx } = testContext(() => {
+      called++
+      return { columns: [], rows: [] }
+    })
+    const result = await tool('lookup_device').run({}, ctx)
+    expect(result.errorCode).toBe('INVALID_PARAM')
+    expect(called).toBe(0)
   })
 })
 

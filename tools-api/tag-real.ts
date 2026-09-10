@@ -3,8 +3,7 @@
  * @module
  */
 
-import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
-import { askdataError } from '../src/errors.ts'
+import { runApiTool, toString, toNumber, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 
 /** tag_real 工具定义。 */
 export const tagRealTool: AskdataApiTool = {
@@ -25,29 +24,27 @@ export const tagRealTool: AskdataApiTool = {
   },
   async run(args, ctx: ApiToolContext) {
     return runApiTool(tagRealTool, args, ctx, async () => {
-      const tagNames = args.tag_names as string[]
-      if (!Array.isArray(tagNames) || tagNames.length === 0) {
-        throw askdataError('INVALID_PARAM', 'tag_names 必填且不能为空数组')
-      }
-      const result = await ctx.apiClient.getTagRealValues(tagNames)
+      const tagNames = validateTagNamesArg(args.tag_names)
+      // 响应是 {tagName: {value, timestamp}} 的对象映射，而非行数组
       return {
-        path: `/wz/iot-etl/iot/getTagRealValues?tagNames=${encodeURIComponent(tagNames.join(','))}`,
-        params: { tagNames },
-        fields: [
-          { name: 'tagName', title: '测点名', type: 'string' },
-          { name: 'value', title: '实时值', type: 'number' },
-          { name: 'timestamp', title: '时间戳', type: 'string' },
-        ],
-        shape: (rows) => {
-          const data: Record<string, unknown>[] = []
-          for (const [tagName, info] of Object.entries(result)) {
-            data.push({
+        request: {
+          path: '/wz/iot-etl/iot/getTagRealValues',
+          params: { tagNames },
+        },
+        describe: (raw) => {
+          const map = (raw ?? {}) as Record<string, { value?: unknown; timestamp?: unknown }>
+          return {
+            fields: [
+              { name: 'tagName', title: '测点名', type: 'string' },
+              { name: 'value', title: '实时值', type: 'number' },
+              { name: 'timestamp', title: '时间戳', type: 'string' },
+            ],
+            data: Object.entries(map).map(([tagName, info]) => ({
               tagName,
-              value: toNumber(info.value as string | null),
-              timestamp: toString(info.timestamp),
-            })
+              value: toNumber(info?.value),
+              timestamp: toString(info?.timestamp),
+            })),
           }
-          return data
         },
       }
     })

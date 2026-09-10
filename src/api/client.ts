@@ -7,17 +7,7 @@
  */
 
 import { askdataError } from '../errors.ts'
-
-/** API 配置。 */
-export interface ApiConfig {
-  baseUrl: string
-  apiPrefix: string
-  token: string
-  openid: string
-  projectId: string
-  timeoutMs: number
-  maxPageSize: number
-}
+import type { ApiConfig } from '../config.ts'
 
 /** API 统一返回结构。 */
 interface ApiResponse<T = unknown> {
@@ -91,21 +81,27 @@ export class ApiClient {
     }
   }
 
-  /** 通用执行方法（供 runApiTool 调用）。 */
-  async execute<T>(path: string, params: Record<string, unknown>): Promise<T> {
-    if (path.includes('postModelDataMeta')) {
+  /**
+   * 通用执行方法（供 runApiTool 调用）：method 显式声明，不再按路径字符串嗅探。
+   * GET 走查询串（数组值自动逗号连接，对齐 tagNames 约定）；POST 走 JSON body。
+   */
+  async execute<T>(method: 'GET' | 'POST', path: string, params: Record<string, unknown>): Promise<T> {
+    if (method === 'POST') {
       return this.post<T>(path, params)
     }
-    return this.get<T>(path, params as Record<string, string>)
+    const query: Record<string, string> = {}
+    for (const [key, value] of Object.entries(params)) {
+      query[key] = Array.isArray(value) ? value.join(',') : String(value)
+    }
+    return this.get<T>(path, query)
   }
 
-  /** 执行 HTTP 请求并处理响应（带重试）。 */
+  /** 执行 HTTP 请求并处理响应（5xx 带退避重试）。 */
   private async request<T>(method: string, url: string, body?: string): Promise<T> {
     const headers: Record<string, string> = this.authHeaders()
     if (body) headers['Content-Type'] = 'application/json'
 
     const maxRetries = 2
-    const lastError = null
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       let resp: Response
       try {

@@ -3,7 +3,7 @@
  * @module
  */
 
-import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { describeQueryResult, runApiTool, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
 /** tag_history 工具定义。 */
@@ -37,41 +37,24 @@ export const tagHistoryTool: AskdataApiTool = {
   },
   async run(args, ctx: ApiToolContext) {
     return runApiTool(tagHistoryTool, args, ctx, async () => {
-      const tagNames = args.tag_names as string[]
+      const tagNames = validateTagNamesArg(args.tag_names)
       const startTime = String(args.start_time ?? '').trim()
-      if (!Array.isArray(tagNames) || tagNames.length === 0) {
-        throw askdataError('INVALID_PARAM', 'tag_names 必填且不能为空数组')
-      }
       if (startTime === '') throw askdataError('INVALID_PARAM', 'start_time 必填')
-
-      const result = await ctx.apiClient.getTagRawHistory({
-        tagNames,
-        startTime,
-        endTime: args.end_time ? String(args.end_time) : undefined,
-        sample: args.sample ? Number(args.sample) : undefined,
-      })
+      const sample = args.sample !== undefined && args.sample !== null && args.sample !== ''
+        ? validatePositiveInt(args.sample, 'sample')
+        : undefined
 
       return {
-        path: '/wz/iot-etl/iot/getTagRawHistory',
-        params: { tagNames, startTime },
-        fields: result.field.map((f) => ({
-          name: f.name,
-          title: f.title || f.name,
-          type: f.type === '52' ? 'datetime' : f.type === '1' || f.type === '11' || f.type === '22' ? 'number' : 'string',
-        })),
-        shape: (rows) =>
-          rows.map((r) => {
-            const obj: Record<string, unknown> = {}
-            for (const f of result.field) {
-              const val = r[f.name]
-              if (f.type === '1' || f.type === '11' || f.type === '22') {
-                obj[f.name] = toNumber(val as string | null)
-              } else {
-                obj[f.name] = toString(val)
-              }
-            }
-            return obj
-          }),
+        request: {
+          path: '/wz/iot-etl/iot/getTagRawHistory',
+          params: {
+            tagNames,
+            startTime,
+            ...(args.end_time ? { endTime: String(args.end_time) } : {}),
+            ...(sample !== undefined ? { sample } : {}),
+          },
+        },
+        describe: describeQueryResult,
       }
     })
   },

@@ -1,9 +1,12 @@
 /**
- * `tag_aggregate`（P0, metadata）：查询测点历史统计值（getTagAggregateHistory）。
+ * `tag_aggregate`（P0, metadata）：查询测点历史统计值（getTagAggrigateHistory）。
+ *
+ * 路径拼写 `Aggrigate` 为 AGP 网关的官方形态（docs/TDD-AGP-API-Smart-Query.md
+ * 实测验证），非笔误——勿"纠正"为 Aggregate。
  * @module
  */
 
-import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { describeQueryResult, runApiTool, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
 /** 16 种统计方法枚举。 */
@@ -55,12 +58,9 @@ export const tagAggregateTool: AskdataApiTool = {
   },
   async run(args, ctx: ApiToolContext) {
     return runApiTool(tagAggregateTool, args, ctx, async () => {
-      const tagNames = args.tag_names as string[]
+      const tagNames = validateTagNamesArg(args.tag_names)
       const startTime = String(args.start_time ?? '').trim()
       const methods = args.methods as string[]
-      if (!Array.isArray(tagNames) || tagNames.length === 0) {
-        throw askdataError('INVALID_PARAM', 'tag_names 必填且不能为空数组')
-      }
       if (startTime === '') throw askdataError('INVALID_PARAM', 'start_time 必填')
       if (!Array.isArray(methods) || methods.length === 0) {
         throw askdataError('INVALID_PARAM', 'methods 必填且不能为空数组')
@@ -71,37 +71,23 @@ export const tagAggregateTool: AskdataApiTool = {
           throw askdataError('INVALID_PARAM', `未知统计方法: ${m}，可选: ${AGGREGATE_METHODS.join(', ')}`)
         }
       }
-
-      const result = await ctx.apiClient.getTagAggregateHistory({
-        tagNames,
-        startTime,
-        methods,
-        endTime: args.end_time ? String(args.end_time) : undefined,
-        sample: args.sample ? Number(args.sample) : undefined,
-        params: args.params ? String(args.params) : undefined,
-      })
+      const sample = args.sample !== undefined && args.sample !== null && args.sample !== ''
+        ? validatePositiveInt(args.sample, 'sample')
+        : undefined
 
       return {
-        path: '/wz/iot-etl/iot/getTagAggregateHistory',
-        params: { tagNames, startTime, methods },
-        fields: result.field.map((f) => ({
-          name: f.name,
-          title: f.title || f.name,
-          type: f.type === '1' || f.type === '11' || f.type === '22' ? 'number' : 'string',
-        })),
-        shape: (rows) =>
-          rows.map((r) => {
-            const obj: Record<string, unknown> = {}
-            for (const f of result.field) {
-              const val = r[f.name]
-              if (f.type === '1' || f.type === '11' || f.type === '22') {
-                obj[f.name] = toNumber(val as string | null)
-              } else {
-                obj[f.name] = toString(val)
-              }
-            }
-            return obj
-          }),
+        request: {
+          path: '/wz/iot-etl/iot/getTagAggrigateHistory',
+          params: {
+            tagNames,
+            startTime,
+            methods,
+            ...(args.end_time ? { endTime: String(args.end_time) } : {}),
+            ...(sample !== undefined ? { sample } : {}),
+            ...(args.params ? { params: String(args.params) } : {}),
+          },
+        },
+        describe: describeQueryResult,
       }
     })
   },

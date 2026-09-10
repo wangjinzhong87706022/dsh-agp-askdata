@@ -16,6 +16,7 @@ import {
   resolveTagStep2Sql,
   resolveTagStep4Sql,
   resolveTagStep5Sql,
+  lookupDeviceSql,
   tagIndexByFilterSql,
   timeSeriesByTagIndexSql,
   aggregateByTagIndexSql,
@@ -359,6 +360,27 @@ describe('P1 优化模板', () => {
   })
 })
 
+describe('lookupDeviceSql（WT_DEVICE 设备层级）', () => {
+  const config = testConfig()
+
+  it('关键字模糊匹配三级名称与编码，LIKE 转义', () => {
+    const sql = lookupDeviceSql(config, { keyword: "逆变器%'_", limit: 50 })
+    expect(sql).toContain('SELECT inverterId, inverterName, inverterCode, arrayId, arrayName, arrayCode, subId, subName, subCode, `type`')
+    expect(sql).toContain('FROM WT_DEVICE')
+    expect(sql).toContain("inverterName LIKE '%逆变器\\%''\\_%'")
+    expect(sql).toContain('subCode LIKE')
+    expect(sql).toContain('ORDER BY inverterCode')
+    expect(sql).toContain('LIMIT 50')
+  })
+  it('device_type 精确过滤；无入参时无 WHERE', () => {
+    const typed = lookupDeviceSql(config, { deviceType: 'inverter', limit: 10 })
+    expect(typed).toContain('`type` = \'inverter\'')
+    expect(typed).not.toContain('LIKE')
+    const all = lookupDeviceSql(config, { limit: 10 })
+    expect(all).not.toContain('WHERE')
+  })
+})
+
 describe('P1 模板全部通过校验层闸门', () => {
   it('MySQL 元数据模板通过 MySQL 白名单', () => {
     const config = testConfig()
@@ -388,6 +410,8 @@ describe('P1 模板全部通过校验层闸门', () => {
     const config = testConfig()
     const sqls = [
       resolveTagStep5Sql(config, 'Udc_1O_174'),
+      lookupDeviceSql(config, { keyword: '逆变器', limit: 100 }),
+      lookupDeviceSql(config, { deviceType: 'array', limit: 100 }),
       tagIndexByFilterSql(config, '^HWNBYC174_1O_'),
       timeSeriesByTagIndexSql(config, {
         tagFilter: '^t_1O_',

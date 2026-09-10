@@ -3,7 +3,7 @@
  * @module
  */
 
-import { runApiTool, toString, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
 
 /** list_models 工具定义。 */
 export const listModelsTool: AskdataApiTool = {
@@ -16,29 +16,29 @@ export const listModelsTool: AskdataApiTool = {
     properties: {},
   },
   async run(args, ctx: ApiToolContext) {
-    return runApiTool(listModelsTool, args, ctx, async () => {
-      const models = await ctx.apiClient.getModelList()
-      return {
-        path: '/wz/meta/getModelList',
-        params: {},
-        fields: [
-          { name: 'id', title: '模型ID', type: 'number' },
-          { name: 'class_alias', title: '模型别名', type: 'string' },
-          { name: 'class_name', title: '模型英文名', type: 'string' },
-          { name: 'class_path', title: '模型路径', type: 'string' },
-          { name: 'class_description', title: '模型描述', type: 'string' },
-          { name: 'classify_tag', title: '分类标签', type: 'string' },
-        ],
-        shape: (rows) =>
-          rows.map((r) => ({
-            id: r.id,
+    return runApiTool(listModelsTool, args, ctx, async () => ({
+      request: { path: '/wz/meta/getModelList', params: {} },
+      describe: (raw) => {
+        const rows = ((raw as { data?: Record<string, unknown>[] }).data ?? []) as Record<string, unknown>[]
+        return {
+          fields: [
+            { name: 'id', title: '模型ID', type: 'number' },
+            { name: 'class_alias', title: '模型别名', type: 'string' },
+            { name: 'class_name', title: '模型英文名', type: 'string' },
+            { name: 'class_path', title: '模型路径', type: 'string' },
+            { name: 'class_description', title: '模型描述', type: 'string' },
+            { name: 'classify_tag', title: '分类标签', type: 'string' },
+          ],
+          data: rows.map((r) => ({
+            id: toNumber(r.id),
             class_alias: toString(r.class_alias),
             class_name: toString(r.class_name),
             class_path: toString(r.class_path),
             class_description: toString(r.class_description),
             classify_tag: toString(r.classify_tag),
           })),
-      }
-    })
+        }
+      },
+    }))
   },
 }

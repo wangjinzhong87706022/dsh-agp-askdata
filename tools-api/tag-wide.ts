@@ -3,7 +3,7 @@
  * @module
  */
 
-import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { describeQueryResult, runApiTool, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
 /** tag_wide 工具定义。 */
@@ -45,45 +45,27 @@ export const tagWideTool: AskdataApiTool = {
   },
   async run(args, ctx: ApiToolContext) {
     return runApiTool(tagWideTool, args, ctx, async () => {
-      const tagNames = args.tag_names as string[]
+      const tagNames = validateTagNamesArg(args.tag_names)
       const startTime = String(args.start_time ?? '').trim()
-      const interval = Number(args.interval ?? 0)
-      if (!Array.isArray(tagNames) || tagNames.length === 0) {
-        throw askdataError('INVALID_PARAM', 'tag_names 必填且不能为空数组')
-      }
       if (startTime === '') throw askdataError('INVALID_PARAM', 'start_time 必填')
-      if (interval <= 0) throw askdataError('INVALID_PARAM', 'interval 必须为正整数')
-
-      const result = await ctx.apiClient.getWideHistory({
-        tagNames,
-        startTime,
-        interval,
-        endTime: args.end_time ? String(args.end_time) : undefined,
-        sample: args.sample ? Number(args.sample) : undefined,
-        dateFormat: args.date_format ? String(args.date_format) : undefined,
-      })
+      const interval = validatePositiveInt(args.interval, 'interval')
+      const sample = args.sample !== undefined && args.sample !== null && args.sample !== ''
+        ? validatePositiveInt(args.sample, 'sample')
+        : undefined
 
       return {
-        path: '/wz/iot-etl/iot/getWideHistory',
-        params: { tagNames, startTime, interval },
-        fields: result.field.map((f) => ({
-          name: f.name,
-          title: f.title || f.name,
-          type: f.type === '52' ? 'datetime' : f.type === '1' || f.type === '11' || f.type === '22' ? 'number' : 'string',
-        })),
-        shape: (rows) =>
-          rows.map((r) => {
-            const obj: Record<string, unknown> = {}
-            for (const f of result.field) {
-              const val = r[f.name]
-              if (f.type === '1' || f.type === '11' || f.type === '22') {
-                obj[f.name] = toNumber(val as string | null)
-              } else {
-                obj[f.name] = toString(val)
-              }
-            }
-            return obj
-          }),
+        request: {
+          path: '/wz/iot-etl/iot/getWideHistory',
+          params: {
+            tagNames,
+            startTime,
+            interval,
+            ...(args.end_time ? { endTime: String(args.end_time) } : {}),
+            ...(sample !== undefined ? { sample } : {}),
+            ...(args.date_format ? { dateFormat: String(args.date_format) } : {}),
+          },
+        },
+        describe: describeQueryResult,
       }
     })
   },

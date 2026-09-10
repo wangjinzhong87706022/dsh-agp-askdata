@@ -624,3 +624,38 @@ ORDER BY alarm_time DESC LIMIT 5
 - `class_path` 真实形态是 `wt_elm_equipment/wt_iot_huaweisun2000`（以表名打头的多级路径），不是 §14.2 早期描述的 `wisetao.pv.inverter` 形式（上游规格愿景）。
 - `meta_classtagmodel.name` 是规格中文名（如"总发电量"），必须严格相等匹配——LLM 在调用 resolve_tag 前应先用 lookup_tag_definition 确认精确中文名。
 - `wt_elm_equipment.class__path` 当前存的是 `wt_elm_equipment` 表名字符串而非真实模型路径，与 `lookup_object` 的 LIKE 过滤兼容性尚可（设备行同样存此值）。
+
+## 17. 结构验证阶段：API 面管线重构 + WT_DEVICE 消费（2026-09-10，feature/schema-validation）
+
+> 承接 `docs/schema-validation-report.md`（真实库 8 表结构验证）与 `docs/TDD-AGP-API-Smart-Query.md`（新 API 网关实测）。
+
+### 17.1 API 工具面管线重构（单次执行契约）
+
+评审发现 8 个 API 工具存在系统性缺陷：`plan()` 内先调一次 typed 客户端方法（HTTP #1，只取 fields 元数据），`runApiTool` 再按 `path+params` 重放一次（HTTP #2，其结果才进 shape）。两次调用参数不一致的后果：
+
+| 工具 | HTTP #2 的实际缺陷 |
+|---|---|
+| `query_model` | body 丢失 `whereStr/orderByStr/groupByStr`——**过滤条件静默失效**，返回未过滤数据 |
+| `resolve_tag`(api) | body 为 `{keyword, limit}`——服务端收到完全不合法的请求 |
+| `tag_history` / `tag_wide` / `tag_aggregate` | 丢失 `endTime/sample/dateFormat` 等可选参数；`tag_aggregate` 路径还拼错（`Aggregate` vs 官方 `Aggrigate`） |
+| `model_attributes` / `tag_real` | URL 出现双查询串或 shape 直接忽略重放结果（靠闭包侥幸工作） |
+
+**重构**（`tools-api/types.ts`）：`ApiPlan` 改为 `request`（`{path, method?, params}`）+ `describe(data)` 两段式——管线对同一响应先执行**恰好一次** HTTP 调用，再由 `describe` 从该响应推导 fields + 类型化 data + 分页。配套修复：
+
+- `ApiClient.execute(method, path, params)` 显式声明 GET/POST，废除 `path.includes('postModelDataMeta')` 字符串嗅探；GET 序列化统一在此收口（数组逗号连接）。
+- QueryResult 形态响应（postModelDataMeta / getTagRawHistory / getWideHistory / getTagAggrigateHistory）共用 `describeQueryResult`：字段类型码集中映射（`1/11/22`→number、`52`→datetime），`page` 首次透传进 `ToolResult.page`。
+- 分页/间隔/样本数入参加 `validatePositiveInt` 机械校验（此前 NaN 可直通 `Math.min`）；`resolve_tag`(api) 的 keyword 拼入 whereStr 前拒绝单引号（条件语法保留字符）。
+- `ApiToolContext.apiClient` 收窄为 `ApiExecutor` 接口，测试可注入内存执行器（`tests/tools-api.spec.ts`：单次执行语义是显式回归用例）。
+
+### 17.2 lookup_device：消费 WT_DEVICE（结构验证遗留闭环）
+
+结构验证报告确认 WT_DEVICE 真实列为 `inverter*/array*/sub*` 三级前缀命名（与预期 `device*` 全异），此前无任何工具消费。本阶段新增 **`lookup_device`**（metadata 层，StarRocks 通道）：
+
+- 模板 `lookupDeviceSql`：keyword 模糊匹配三级 name/code 六列（`escapeLike` 转义）+ `device_type` 精确过滤（`escapeSqlString`），keyword 与 device_type 至少提供一个；列面以报告 §2 实测 DDL 为准。
+- 层级行携带逆变器及其所属组串、子阵的完整 id/编码，可作测点 tagName 设备段与 WT_CUBE `device` 过滤的取值来源；已入 preset persona 提示。
+- 测试同步：模板金样 + StarRocks 白名单闸门守卫（`templates.spec.ts`）、工具行为与注册表（`tools.spec.ts`）、装配清单 12 工具（`service.spec.ts`、`dsh-config.spec.ts`）。
+
+### 17.3 已知待办（本轮明确暂缓）
+
+- `scripts/schema-validate.mjs` 硬编码数据库凭据已随历史提交（违反"凭据不落盘"红线）——待轮换凭据并改环境变量注入。
+- API 面信任边界：`query_model` 的 `whereStr/orderByStr/groupByStr` 为自由查询片段直传网关，插件层无注入校验——待与网关侧确认净化责任后补防线。

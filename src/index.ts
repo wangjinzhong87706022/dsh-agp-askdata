@@ -27,7 +27,7 @@ import { askdataError } from './errors.ts'
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（SQL P0 五工具 + P1 六工具 + API P0 八工具）。 */
+  /** 全部工具面（SQL 12 工具：P0 五 + P1 六 + lookup_device；API P0 八工具）。 */
   tools: AskdataTool[]
   /** API 工具面（P0 八工具，新 API 网关）。 */
   apiTools: AskdataApiTool[]

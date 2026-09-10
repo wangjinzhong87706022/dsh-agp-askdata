@@ -3,7 +3,7 @@
  * @module
  */
 
-import { runApiTool, toString, toNumber, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { describeQueryResult, runApiTool, validatePositiveInt, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
 /** query_model 工具定义。 */
@@ -52,43 +52,27 @@ export const queryModelTool: AskdataApiTool = {
       if (modelName === '') throw askdataError('INVALID_PARAM', 'model_name 必填')
       const searchStr = String(args.search_str ?? '').trim()
 
-      const pageSize = Math.min(Number(args.page_size ?? 100), ctx.config.api.maxPageSize)
-      const pageNum = Number(args.page_num ?? 1)
-
-      const result = await ctx.apiClient.queryModelData({
-        modelName,
-        searchStr,
-        whereStr: args.where_str ? String(args.where_str) : undefined,
-        pageNum,
-        pageSize,
-        orderByStr: args.order_by_str ? String(args.order_by_str) : undefined,
-        groupByStr: args.group_by_str ? String(args.group_by_str) : undefined,
-      })
-
-      // 动态构建 fields：从 API 返回的 field 数组
-      const fields = result.field.map((f) => ({
-        name: f.name,
-        title: f.title || f.name,
-        type: (f.type === '1' || f.type === '11' || f.type === '22' ? 'number' : 'string') as 'string' | 'number' | 'datetime' | 'boolean',
-      }))
+      const pageSize = Math.min(
+        validatePositiveInt(args.page_size ?? 100, 'page_size'),
+        ctx.config.api.maxPageSize,
+      )
+      const pageNum = validatePositiveInt(args.page_num ?? 1, 'page_num')
 
       return {
-        path: '/wz/meta/postModelDataMeta',
-        params: { modelName, searchStr, pageSize, pageNum },
-        fields,
-        shape: (rows) =>
-          rows.map((r) => {
-            const obj: Record<string, unknown> = {}
-            for (const f of result.field) {
-              const val = r[f.name]
-              if (f.type === '1' || f.type === '11' || f.type === '22') {
-                obj[f.name] = toNumber(val as string | null)
-              } else {
-                obj[f.name] = toString(val)
-              }
-            }
-            return obj
-          }),
+        request: {
+          path: '/wz/meta/postModelDataMeta',
+          method: 'POST',
+          params: {
+            modelName,
+            searchStr,
+            whereStr: args.where_str ? String(args.where_str) : '',
+            pageNum,
+            pageSize,
+            orderByStr: args.order_by_str ? String(args.order_by_str) : '',
+            groupByStr: args.group_by_str ? String(args.group_by_str) : '',
+          },
+        },
+        describe: describeQueryResult,
       }
     })
   },
