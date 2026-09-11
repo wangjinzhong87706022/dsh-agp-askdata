@@ -722,3 +722,14 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 | 3.4 | getTagAggrigateHistory | GET | ✗ 从未通过 |
 
 **规律**：元数据/属性类接口（2.3/2.6/3.1）全部正常；**数据行查询类接口中，POST 全部正常，GET 大面积 -1**（2.1 vs 2.2、2.4 vs 2.5 两组同能力对照均如此）。结合 §18.3 的时变漂移，指向服务端数据查询服务（尤其 GET 查询路径）的部署/会话层缺陷。建议 AGP 侧优先核对 GET 查询路径（`getModelDataMeta`/`getRelationDataMeta`/`getTag*History`）与服务端日志。
+
+### 18.5 AGP 侧修复后回归验证（2026-09-11 09:40）
+
+AGP 通知后台恢复后重跑两个探测脚本，结果**精确分层**：
+
+| 分组 | 接口 | 修复后状态 |
+|---|---|---|
+| 时变漂移组（§18.3 故障） | 3.2 getTagRawHistory / 3.3 getWideHistory | **✓ 已恢复**（raw 两模式各 10/1440 行；wide code=0 特殊空宽表形态） |
+| 持续故障组（首次测试即 -1，修复后依旧） | 2.1 getModelDataMeta GET（executeTime≈97ms）/ 2.4 getRelationDataMeta GET（≈108ms）/ 3.4 getTagAggrigateHistory / 2.7b postRelationAggrigateData | **✗ 仍 -1** |
+
+结论：本次恢复只修复了 §18.3 的时变漂移（历史查询服务的会话/资源类故障）；**2.1、2.4、3.4、2.7b 四个接口属另一类持续性缺陷**（首次接入即不可用，与凭证、参数、时间窗无关，fail-fast 毫秒级），推测为该部署未装配对应查询能力或代码缺陷，需 AGP 侧按 §18.4 矩阵单独排查。我方探测脚本保留，修复后重跑即可回归。
