@@ -10,7 +10,7 @@ import { askdataError } from '../src/errors.ts'
 export const tagWideTool: AskdataApiTool = {
   name: 'tag_wide',
   description:
-    '查询等间距的历史数据（宽格式），适合画曲线图。interval 为采样间隔（秒）。时间格式：2023-12-30 01:22:22',
+    '查询等间距的历史数据（宽格式），适合画曲线图。interval 为采样间隔（秒）。时间格式：2023-12-30 01:22:22。注意：end_time 与 sample 至少提供一个（网关实际实现要求，20260910 文档未写明）。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
@@ -30,11 +30,11 @@ export const tagWideTool: AskdataApiTool = {
       },
       end_time: {
         type: 'string',
-        description: '结束时间（与 sample 互斥）',
+        description: '结束时间；end_time 与 sample 必须至少提供一个（网关实测要求）',
       },
       sample: {
         type: 'integer',
-        description: '样本数（与 end_time 互斥）',
+        description: '样本数；end_time 与 sample 必须至少提供一个（网关实测要求）',
       },
       date_format: {
         type: 'string',

@@ -688,3 +688,14 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 | `postRelationAggrigateData` | ✓（可达） | 项目内暂无可用关系名，返回标准错误契约 |
 
 另：鉴权三头实测为 `WT-TOKEN / WT-OPENID / WT-ROUTER`（`WT-APPID`/`WT-PROJECTID` 可选带）；缺 `WT-ROUTER` 时网关误报 `00011 登录过期`（§17.1 已修复）。
+
+### 18.3 iot-etl 历史查询链路故障取证（2026-09-11 08:47–09:10）
+
+排除"参数不全"假设的对照实验（`getTagAggrigateHistory` 为焦点，旁及同链路接口）：
+
+1. **参数校验层健在**：缺 `methods` → `code=1 "参数[methods]为必填项"`；`getWideHistory` 缺 endTime/sample → `"错误：结束时间和样本数不可同时为空!"`。参数不全会有明确业务报错，而非 `-1 系统内部出现错误`。
+2. **同参数不同结果（故障漂移）**：`getTagRawHistory` 08:47 以同参数成功返回 1440 行，09:06 起同参数 `-1`；`getWideHistory` 08:47 返回 code=0 空宽表，09:10 起同参数 `-1`。参数未变，服务端状态变了。
+3. **参数空间已穷举**（20+ 组合无一改变错误形态）：文档全部形态、未文档化参数（interval/dateFormat/searchStr/sample+endTime 并存）、`%20`/`+` 编码、大小写、非法方法名、2024 光伏旧窗 / 2026-09 现数据窗 / 极短窗、新旧两代测点。非法方法名同样 `-1`（值校验发生在崩溃点之后）。
+4. **故障边界**：走历史库查询的三个接口（raw/aggregate/wide 带合法参数）全倒；走实时缓存的 `getIOTTagRealValues` 始终正常；各接口参数校验层正常 → 故障定位在 **iot-etl 历史数据查询服务**（TSDB 历史库连接/执行层），非参数、非鉴权、非数据缺失（该窗口 raw 曾返回 1440 行）。
+5. 顺带发现文档偏差：`getWideHistory` 实际要求 endTime/sample 至少其一（0910 文档称 endTime "选择输入"），`tag_wide` 工具描述已按实测修正。
+6. 处置：`tag_aggregate`/`tag_history`/`tag_wide` 将该错误收敛为 `API_ERROR` 契约返回；待 AGP 侧修复后重跑 `scripts/tsdb-api-probe.mjs` 回归，无需改代码。取证用的精确 timestamp（如 `1789088303425`）可直接对齐服务端日志。
