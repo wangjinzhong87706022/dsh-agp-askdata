@@ -776,3 +776,23 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 真实浏览器（Playwright 驱动，真实点击 + 真实键盘输入）全链路打通：DSH Web 打开会话 → 输入"当前项目一共有多少个可用的数据模型？请调用工具查询" → 真实点击发送 → LLM（deepseek-v4-flash-0731）推理 → **调用本插件 `list_models` 工具** → 渲染回答："当前项目共有 233 个可用数据模型（接口返回 rowCount: 233）" + 模型表格（模型别名/英文名/分类）。会话状态栏：3 轮 · 21 步，LLM 3m57s，工具调用 54.4s。233 与工具层 E2E（§18.6）完全一致。
 
 浏览器自动化要点（沉淀）：注入坐标为 **CSS 像素**（用 `:hover` 判定实验确认）；应用输入状态需真实输入事件（`insertText`/粘贴），程序化 set value 不进 store；发送按钮首次点击偶发不触发，hover 预检 + 二次点击可靠。过程中定位并排除了两处误判：LLM 报 402 为 tokenrhythm 账户欠费（换 key 解决）；数据接口 -1 为"参数全传"规则（§18.5）。
+
+### 18.8 接口版式 20260911 适配 + 真实问数验证（2026-09-11 14:00，通过）
+
+**0911 版差异**：§3.2/3.3/3.4 显式标注 GET；**新增 §3.5 `getModelTagsByName`**（模型全部测点+实时值）与 **§3.6 `getObjetTags`**（实体对象测点+实时值，官方拼写 Objet）。新增工具 `model_tags` / `object_tags`，API 面 10 → **12**。
+
+实测发现的网关事实（已沉淀到工具描述）：
+- `getModelTagsByName` 成功响应的行数据键为 **`date`**（服务端拼写问题），describe 双键兼容；模型未绑定采集测点时返回空。
+- `getObjetTags` 要求 whereStr 必填（缺则 `code=1`），且**服务端 SQL 硬性要求模型含「内部编码」列**（实体模型标准属性）——对测点类模型（模拟量模型）报 `Unknown column '内部编码'`；本项目水泵实体模型尚未建模，待 AGP 侧补建后该工具即生效。
+
+**真实问数验证（DSH Web 真实浏览器会话，deepseek-v4-flash-0731）**：
+
+| 问题 | agent 路径 | 结果 |
+|---|---|---|
+| 第二号泵现在的电流是多少？ | persona 引导的编码规律 → `tag_real(current_1O_pump0002)` | ✓ **20.07 A**（2026-09-10 18:56 采集），渲染测点/实时值/采集时间卡片 |
+| 三号泵昨天一天的温度曲线？ | 确认测点 temp_1O_pump0003（60.13°C 实时）→ tag_wide 空 → 降级 `tag_history`（1440 点）+ 分段 `tag_aggregate`（4h×6 段） | ✓ 24 小时整点表 + 四阶段趋势（24.06–61.07°C，波动 37°C，傍晚高峰/停机散热节律） |
+
+**E2E 逼出的修正**：
+- `list_models` 增加 **keyword 客户端过滤**（别名/英文名/描述）与分页参数——网关不分页、DSH render 只给 LLM 前 20 行，此前 agent 盲猜模型英文名 15+ 次全部失败；keyword="模拟量" 一次命中 `wt_iot_analogtag`。
+- `query_model` 的 modelName 用**中文别名**（'模拟量模型'），persona 已写明（英文名 wt_iot_analogtag 会报模型不存在）。
+- persona 沉淀测点编码规律（current/voltage/temp/power/electric_1O_pumpXXXX）与本项目测点模型指引；`resolve_tag` 依赖的 wt_iot_tags 字典模型在本项目未绑定，反查走 query_model。

@@ -32,13 +32,15 @@ describe('服务装配', () => {
     ])
   })
 
-  it('暴露 10 个 API 工具（20260910 接口版）', () => {
+  it('暴露 12 个 API 工具（20260911 接口版）', () => {
     expect(service().apiTools.map((t) => t.name)).toEqual([
       'list_models',
       'model_attributes',
       'query_model',
       'query_model_segment',
       'query_relation_segment',
+      'model_tags',
+      'object_tags',
       'resolve_tag',
       'tag_real',
       'tag_history',

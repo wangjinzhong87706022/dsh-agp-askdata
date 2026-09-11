@@ -63,11 +63,13 @@ const queryResult = (overrides?: Partial<{ field: unknown[]; data: unknown[]; pa
 })
 
 describe('单次执行语义（管线不重放第二次请求）', () => {
-  it('全部 10 个工具各恰好发起一次 HTTP 调用', async () => {
+  it('全部 12 个工具各恰好发起一次 HTTP 调用', async () => {
     const respond = (call: RecordedCall): unknown => {
       if (call.path.includes('getModelList')) return { field: [], data: [{ id: 1 }] }
       if (call.path.includes('getIOTTagRealValues')) return { field: [], data: [{ value: 1, time: 't', tagName: 'A' }] }
       if (call.path.includes('getModelBasAttributes')) return { field: [{ name: 'f', type: '4' }] }
+      if (call.path.includes('getModelTagsByName')) return { field: [], date: [{ tagname: 't', value: 1 }] }
+      if (call.path.includes('getObjetTags')) return { field: [], data: [{ tagname: 't' }] }
       return queryResult()
     }
     for (const t of apiTools) {
@@ -85,10 +87,12 @@ describe('单次执行语义（管线不重放第二次请求）', () => {
           search_str: '组织名称,count(*) as 计数',
           segment: [{ where_str: '年龄 > 20', title: '青年' }],
         },
+        model_tags: { model_name: 'm' },
+        object_tags: { model_name: 'm', where_str: "名称 = '对象A'" },
         resolve_tag: { keyword: '水位' },
         tag_real: { tag_names: ['A_1O_D1'] },
         tag_history: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', end_time: '2024-08-15 00:00:00' },
-        tag_wide: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', interval: 60 },
+        tag_wide: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', interval: 60, end_time: '2024-08-15 00:00:00' },
         tag_aggregate: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', end_time: '2024-08-15 00:00:00', methods: ['max', 'min'] },
       }[t.name] ?? {}
       const { ctx, calls } = testContext(respond)
@@ -312,13 +316,68 @@ describe('describe 类型化与分页', () => {
     expect(result.data[0]).toEqual({ time: '2024-08-14 10:00:00', value: 12.5, name: 'x' })
     expect(result.page).toEqual({ pageNum: 1, pageSize: 100, pageTotal: 3, itemTotal: 205 })
   })
-  it('list_models 解包 {field, data} 包装；id 数值化', async () => {
-    const { ctx } = testContext(() => ({
+  it('list_models：解包 {field, data} 包装；keyword 客户端过滤 + 分页', async () => {
+    const { ctx, calls } = testContext(() => ({
       field: [],
-      data: [{ id: '7', class_alias: '逆变器', class_name: 'wt_iot_huaweisun2000', class_path: 'wt_elm_equipment/wt_iot_huaweisun2000' }],
+      data: [
+        { id: '7', class_alias: '逆变器', class_name: 'wt_iot_huaweisun2000', class_description: '华为逆变器', classify_tag: 'x' },
+        { id: '8', class_alias: '模拟量模型', class_name: 'wt_iot_analogtag', class_description: '水泵测点', classify_tag: 'x' },
+        { id: '9', class_alias: '水表模型', class_name: 'wt_1_meter', class_description: '安科瑞水表', classify_tag: 'x' },
+      ],
     }))
     const result = await tool('list_models').run({}, ctx)
-    expect(result.data[0]).toMatchObject({ id: 7, class_alias: '逆变器' })
+    expect(result.success).toBe(true)
+    expect(result.rowCount).toBe(3)
+
+    const r2 = await tool('list_models').run({ keyword: '泵' }, ctx)
+    expect(r2.rowCount).toBe(1)
+    expect(r2.data.map((x) => x.class_alias)).toEqual(['模拟量模型'])
+    expect(r2.page).toMatchObject({ pageNum: 1, pageSize: 50, itemTotal: 1 })
+
+    const r3 = await tool('list_models').run({ keyword: '模拟量' }, ctx)
+    expect(r3.data[0]).toMatchObject({ id: 8, class_name: 'wt_iot_analogtag' })
+    expect(calls).toHaveLength(3)
+  })
+  it('model_tags：服务端 date 键拼写怪癖兼容（行数据在 date 而非 data）', async () => {
+    const { ctx, calls } = testContext(() => ({
+      field: [
+        { name: 'tagname', title: '测点标识', type: '3' },
+        { name: 'value', title: '实时值', type: '22' },
+      ],
+      date: [{ tagname: 'current_1O_pump0001', value: '26.66' }],
+      page: { pageNum: 1, pageSize: 100, pageTotal: 1, itemTotal: 1 },
+    }))
+    const result = await tool('model_tags').run({ model_name: '模拟量模型' }, ctx)
+    expect(result.success).toBe(true)
+    expect(calls[0]).toMatchObject({
+      method: 'GET',
+      path: '/wz/iot-etl/iot/getModelTagsByName',
+      params: { modelName: '模拟量模型', pageNum: 1, pageSize: 100 },
+    })
+    expect(result.data[0]).toEqual({ tagname: 'current_1O_pump0001', value: 26.66 })
+    expect(result.page).toMatchObject({ itemTotal: 1 })
+  })
+  it('object_tags：GET + whereStr 必填、单引号拒绝、QueryResult 解释', async () => {
+    const { ctx, calls } = testContext(() => ({
+      field: [
+        { name: 'tagname', title: '测点标识', type: '3' },
+        { name: 'value', title: '实时值', type: '22' },
+      ],
+      data: [{ tagname: 'current_1O_pump0002', value: '20.07' }],
+    }))
+    const result = await tool('object_tags').run({ model_name: 'm', where_str: "名称 = '第二台水泵'" }, ctx)
+    expect(result.success).toBe(true)
+    expect(calls[0]).toMatchObject({
+      method: 'GET',
+      path: '/wz/iot-etl/iot/getObjetTags',
+      params: { modelName: 'm', whereStr: "名称 = '第二台水泵'", pageNum: 1, pageSize: 100 },
+    })
+    expect(result.data[0]).toEqual({ tagname: 'current_1O_pump0002', value: 20.07 })
+
+    const { ctx: ctx2, calls: calls2 } = testContext(() => queryResult())
+    expect((await tool('object_tags').run({ model_name: 'm' }, ctx2)).errorCode).toBe('INVALID_PARAM')
+    expect((await tool('object_tags').run({ model_name: 'm', where_str: '   ' }, ctx2)).errorCode).toBe('INVALID_PARAM')
+    expect(calls2).toHaveLength(0)
   })
   it('model_attributes：实测 QueryResult 形态（field=列定义，data=属性行）', async () => {
     const wrapped = testContext(() => ({

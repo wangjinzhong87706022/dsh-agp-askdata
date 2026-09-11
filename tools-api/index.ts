@@ -1,9 +1,9 @@
 /**
- * API 工具注册表：P0（元数据面 10 工具，20260910 接口版）。
+ * API 工具注册表：P0（元数据面 12 工具，20260911 接口版）。
  *
  * 顺序：先字典（list_models → model_attributes），再查询（query_model →
- * query_model_segment → query_relation_segment），再测点（resolve_tag →
- * tag_real → tag_history → tag_wide → tag_aggregate）。
+ * query_model_segment → query_relation_segment → model_tags → object_tags），
+ * 再测点（resolve_tag → tag_real → tag_history → tag_wide → tag_aggregate）。
  * @module
  */
 
@@ -13,6 +13,8 @@ import { modelAttributesTool } from './model-attributes.ts'
 import { queryModelTool } from './query-model.ts'
 import { queryModelSegmentTool } from './query-model-segment.ts'
 import { queryRelationSegmentTool } from './query-relation-segment.ts'
+import { modelTagsTool } from './model-tags.ts'
+import { objectTagsTool } from './object-tags.ts'
 import { tagRealTool } from './tag-real.ts'
 import { tagHistoryTool } from './tag-history.ts'
 import { tagWideTool } from './tag-wide.ts'
@@ -26,6 +28,8 @@ export const apiTools: AskdataApiTool[] = [
   queryModelTool,
   queryModelSegmentTool,
   queryRelationSegmentTool,
+  modelTagsTool,
+  objectTagsTool,
   resolveTagTool,
   tagRealTool,
   tagHistoryTool,
@@ -39,6 +43,8 @@ export {
   queryModelTool,
   queryModelSegmentTool,
   queryRelationSegmentTool,
+  modelTagsTool,
+  objectTagsTool,
   tagRealTool,
   tagHistoryTool,
   tagWideTool,
