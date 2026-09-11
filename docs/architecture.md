@@ -796,3 +796,18 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 - `list_models` 增加 **keyword 客户端过滤**（别名/英文名/描述）与分页参数——网关不分页、DSH render 只给 LLM 前 20 行，此前 agent 盲猜模型英文名 15+ 次全部失败；keyword="模拟量" 一次命中 `wt_iot_analogtag`。
 - `query_model` 的 modelName 用**中文别名**（'模拟量模型'），persona 已写明（英文名 wt_iot_analogtag 会报模型不存在）。
 - persona 沉淀测点编码规律（current/voltage/temp/power/electric_1O_pumpXXXX）与本项目测点模型指引；`resolve_tag` 依赖的 wt_iot_tags 字典模型在本项目未绑定，反查走 query_model。
+
+### 18.9 图表方案决策：与 dsh-genui 配合（2026-09-11 15:00，验证通过）
+
+**问数结果的图表呈现选定与 dsh-genui 配合，不自研、不引 nlbi**。三方案对比：
+
+| 方案 | 机制 | 结论 |
+|---|---|---|
+| **dsh-genui 配合**（选定） | LLM 在回答里输出 ```dsh-ui 围栏（白名单组件 JSON）或调 render_ui/validate_dsh_ui 工具，genui 渲染成交互组件；图表组件 `chart`（bars/line/donut）与 **`echart`**（ECharts 全功能：line/area/scatter，渐变/tooltip/图例） | **零安装**（web profile 已含）、双通道渲染不依赖宿主源码、职责干净（askdata 管取数、genui 管呈现）；集成成本 = persona 一句引导 |
+| dsh-plugin-nlbi | 完整 NL BI 平台：Text2SQL + 15+ 图表 + Dashboard + 指标/维度/报表/权限，基于 dsh-mysql 连接底座 | 重型且自成体系：数据底座是 MySQL 直连（本项目时序在 AGP API），引入即两套取数/权限体系；适合"业务自助 BI 门户"场景，不适合对话内嵌图表 |
+| dsh-data-agent | 取数+分析一体的 agent（自带 catalog/连接管理，analysis-html 报告） | 与 askdata 定位重叠（它也取数），不是纯图表件；作为图表依赖会绑死其连接体系 |
+| 自研 | 需写 client 渲染组件 + 白名单安全 + 主题适配 + 流式渲染 | genui 已全部解决（27 类组件、ECharts、多表面围栏发现），重复造轮子 |
+
+**实施**：persona 增加数据呈现指引（第 6 条）——时序曲线/趋势用 ```dsh-ui echart preset line（`{"type":"echart","title":"…","preset":"line","data":[{"label":"HH:mm","value":n},...]}`），统计对比用 bars、占比用 donut；单点实时值不强行配图。语法本身由 genui 注入的 system-prompt section 与 `genui` skill 承载，无需本插件重复。
+
+**验证**（真实浏览器会话）："三号泵昨天一天的温度曲线" → agent 调 `tag_history`（1440 点）+ `tag_aggregate`（全天统计）→ 回答内渲染 **ECharts 折线图**（24h 曲线）+ 全天统计（最高 61.07°C / 最低 24.06°C / 平均 41.21°C）+ 四阶段趋势描述；会话 7 轮 42 步。过程中 tag_wide 返回空，agent 依错误契约自动降级组合工具——验证了容错设计。

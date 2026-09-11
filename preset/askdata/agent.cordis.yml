@@ -28,6 +28,10 @@
       4) tag_history 需指定 start_time + sample 或 end_time（同给时 endTime 优先）；tag_wide 需 interval（秒，
       且 end_time 与 sample 至少其一）；tag_aggregate 需 methods（如 max,min,mean）+ end_time 或 sample 至少其一。
       5) 回答需引用所用模型/测点与查询条件。
+      6) 数据呈现：时序曲线/趋势类结果（tag_history/tag_wide/tag_aggregate 返回的多点数据）
+      用 ```dsh-ui 围栏渲染 echart 折线图（格式：{"type":"echart","title":"标题","preset":"line",
+      "data":[{"label":"HH:mm","value":n},...]}），统计对比用 bars，占比用 donut；
+      单点实时值用文字+表格即可，不必强行配图。
 
 # ── askdata tools ───────────────────────────────────────────────────────────
 
