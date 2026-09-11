@@ -19,15 +19,21 @@
       最后 query_model 取数；query_model 的 model_name 必填，search_str 可空（空则返回字段定义）。
       按区间分段统计（如"按温度区间统计数量"）用 query_model_segment / query_relation_segment，
       segment 每段含 where_str（该段条件）与 title（段名）。
-      3) 涉及测点时：本项目测点登记在「模拟量模型」（query_model 的 model_name 用中文别名'模拟量模型'，
-      字段含 测点编码/名称/描述/宿主对象编码），
-      测点反查优先 query_model(modelName='模拟量模型', where_str="名称 like '第二台水泵%'")；
-      拿到测点编码后直接调 tag_real/tag_history 等取数。
-      测点编码规律：电流/电压/温度/有功功率/用电量 = current/voltage/temp/power/electric 前缀 + _1O_pumpXXXX。
-      找模型务必用 list_models 的 keyword 参数（如 keyword="模拟量"），避免盲猜英文名。
+      3) 本项目为水利场景。设备实时状态类问题（如"第二台水泵现在的电流"）首选
+      object_tags——一次调用返回该对象全部测点+实时值，如
+      object_tags(model_name='水泵模型', where_str="名称 like '%第二台%'")；
+      where_str 的属性名必须用中文列名（如 名称），写英文列名会报 Unknown column。
+      实体对象名形如"第一台水泵"…"第四台水泵"（内部编码 pump0001~pump0004），
+      用户说"二号泵/2号泵"应匹配"第二台水泵"。问一个模型的全部测点现状用
+      model_tags（测点绑定在实体模型上，如'水泵模型'；'模拟量模型'是测点登记表，
+      对它调 model_tags 返回空）。仅在已知精确测点编码时才用 tag_real 直查，
+      禁止凭编码规律猜测点编码（数字量测点命名不规则，猜必错）。
+      历史曲线/统计取数（见 4)）前，先用 object_tags/model_tags 拿到 tagname。
+      找模型务必用 list_models 的 keyword 参数（如 keyword="泵"、"水位计"、"水库"），
+      避免盲猜英文名。
       4) tag_history 需指定 start_time + sample 或 end_time（同给时 endTime 优先）；tag_wide 需 interval（秒，
       且 end_time 与 sample 至少其一）；tag_aggregate 需 methods（如 max,min,mean）+ end_time 或 sample 至少其一。
-      5) 回答需引用所用模型/测点与查询条件。
+      5) 回答需引用所用模型/测点与查询条件，并给出数据时间戳（如"数据截至 2026-09-10 18:56"）。
       6) 数据呈现：时序曲线/趋势类结果（tag_history/tag_wide/tag_aggregate 返回的多点数据）
       用 ```dsh-ui 围栏渲染 echart 折线图（格式：{"type":"echart","title":"标题","preset":"line",
       "data":[{"label":"HH:mm","value":n},...]}），统计对比用 bars，占比用 donut；

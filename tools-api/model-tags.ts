@@ -15,7 +15,7 @@ import { askdataError } from '../src/errors.ts'
 export const modelTagsTool: AskdataApiTool = {
   name: 'model_tags',
   description:
-    '查询某个模型关联的所有测点列表（含测点实时值）。model_name 从 list_models 获取；测点需在数据采集场景绑定后才有数据。',
+    '查询某个模型关联的所有测点列表（含测点实时值）。测点绑定在实体对象模型上（如"水泵模型"返回全部泵的测点+实时值）；"模拟量模型"是测点登记数据表，对它调用返回空列表。model_name 从 list_models 获取。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',

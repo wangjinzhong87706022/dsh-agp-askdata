@@ -14,7 +14,7 @@ import { runApiTool, toString, toNumber, validateTagNamesArg, type AskdataApiToo
 export const tagRealTool: AskdataApiTool = {
   name: 'tag_real',
   description:
-    '查询一个或多个测点的实时值。tagName 格式为 "前缀_粒度_设备"。不确定 tagName 时先调 resolve_tag。',
+    '按精确测点编码查询实时值（返回行含 tagName/value/时间/测点名称）。仅适合已拿到编码的场景；按设备语义查实时状态请优先 object_tags/model_tags（一次返回测点编码+实时值），不要凭编码规律猜 tagName。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',

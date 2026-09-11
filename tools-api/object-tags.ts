@@ -16,7 +16,7 @@ import { askdataError } from '../src/errors.ts'
 export const objectTagsTool: AskdataApiTool = {
   name: 'object_tags',
   description:
-    '查询一个实体对象（如某台水泵/某块水表）的全部测点及实时值。需指定实体模型名与定位条件 where_str（如 "名称=\'第一台水泵\'"）；多个对象命中时返回第一个。要求模型为实体对象模型（含内部编码列）。',
+    '查询一个实体对象（如某台水泵）的全部测点及实时值——设备实时状态类问题的首选，一次调用即可返回对象全部测点含实时值。where_str 的属性名必须用中文列名（如 "名称 = \'第一台水泵\'" 或 "名称 like \'%第二台%\'"），英文列名会报 Unknown column；命中多个对象时返回第一个。仅实体对象模型（含「内部编码」列，如水泵模型）可用。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
