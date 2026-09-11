@@ -699,3 +699,26 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 4. **故障边界**：走历史库查询的三个接口（raw/aggregate/wide 带合法参数）全倒；走实时缓存的 `getIOTTagRealValues` 始终正常；各接口参数校验层正常 → 故障定位在 **iot-etl 历史数据查询服务**（TSDB 历史库连接/执行层），非参数、非鉴权、非数据缺失（该窗口 raw 曾返回 1440 行）。
 5. 顺带发现文档偏差：`getWideHistory` 实际要求 endTime/sample 至少其一（0910 文档称 endTime "选择输入"），`tag_wide` 工具描述已按实测修正。
 6. 处置：`tag_aggregate`/`tag_history`/`tag_wide` 将该错误收敛为 `API_ERROR` 契约返回；待 AGP 侧修复后重跑 `scripts/tsdb-api-probe.mjs` 回归，无需改代码。取证用的精确 timestamp（如 `1789088303425`）可直接对齐服务端日志。
+
+### 18.4 全接口普查与凭证对照实验（2026-09-11 09:15，`scripts/meta-api-probe.mjs`）
+
+**凭证假设已否定**：故意用错误 `WT-TOKEN`、乃至缺 `WT-OPENID`，`getIOTTagRealValues` / `getModelList` 照常返回真实数据——网关对 token 值**未做实际校验**（此前的 `00011 登录过期` 实为缺 `WT-ROUTER` 头所致）。-1 错误与凭证无关；顺带提醒 AGP 侧：时序接口当前无鉴权即读数，属安全隐患。
+
+**12 接口健康矩阵**（干净 UTF-8 通道；注意 Windows curl 命令行发中文参数会 GBK 乱码导致"没有找到模型"假错误，探测须走 Node/脚本）：
+
+| # | 接口 | 方法 | 状态 |
+|---|---|---|---|
+| 2.1 | getModelDataMeta | GET | ✗ -1（同模型 POST 版 2.2 正常——同能力 GET/POST 对照） |
+| 2.2 | postModelDataMeta | POST | ✓ 模拟量模型 20 行；出现文档未载的类型码 **61**（字典型，工具层按 string 兜底） |
+| 2.3 | getModelBasAttributes | GET | ✓ |
+| 2.4 | getRelationDataMeta | GET | ✗ -1（关系"组织和用户的关系"经 2.6 证实存在；POST 版 2.5 正常） |
+| 2.5 | postRelationDataMeta | POST | ✓ 返回真实组织关系数据 |
+| 2.6 | getRelationBasAttributes | GET | ✓ |
+| 2.7 | postModelAggrigateData | POST | ✓ 分段 20/20 |
+| 2.7b | postRelationAggrigateData | POST | ✗ -1 |
+| 3.1 | getIOTTagRealValues | GET | ✓ |
+| 3.2 | getTagRawHistory | GET | ✓→✗（08:47→09:06 漂移，见 §18.3） |
+| 3.3 | getWideHistory | GET | ✓(空)→✗（同上漂移） |
+| 3.4 | getTagAggrigateHistory | GET | ✗ 从未通过 |
+
+**规律**：元数据/属性类接口（2.3/2.6/3.1）全部正常；**数据行查询类接口中，POST 全部正常，GET 大面积 -1**（2.1 vs 2.2、2.4 vs 2.5 两组同能力对照均如此）。结合 §18.3 的时变漂移，指向服务端数据查询服务（尤其 GET 查询路径）的部署/会话层缺陷。建议 AGP 侧优先核对 GET 查询路径（`getModelDataMeta`/`getRelationDataMeta`/`getTag*History`）与服务端日志。
