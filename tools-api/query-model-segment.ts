@@ -33,7 +33,7 @@ export const queryModelSegmentTool: AskdataApiTool = {
   inputSchema: {
     type: 'object',
     properties: {
-      model_name: { type: 'string', description: '模型名称（从 list_models 获取）' },
+      model_name: { type: 'string', description: '中文模型别名（list_models 的 class_alias，如 "职工基础模型"）；英文名会报模型不存在' },
       search_str: { type: 'string', description: '聚合定义，如 "姓名,count(*) as 计数"' },
       segment: {
         type: 'array',

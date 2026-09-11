@@ -10,14 +10,14 @@ import { askdataError } from '../src/errors.ts'
 export const queryModelTool: AskdataApiTool = {
   name: 'query_model',
   description:
-    '查询模型数据。支持中文属性名。search_str 为查询字段（如 *），where_str 为条件（如 年龄>30）。model_name 从 list_models 获取。',
+    '查询模型数据。支持中文属性名。search_str 为查询字段（如 *），where_str 为条件（如 年龄>30）。model_name 必须用中文模型别名（list_models 返回的 class_alias，如 "水库基础模型"），用英文名 class_name 会报"模型不存在"。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
     properties: {
       model_name: {
         type: 'string',
-        description: '模型英文名（从 list_models 获取）',
+        description: '中文模型别名（list_models 的 class_alias，如 "水库基础模型"、"模拟量模型"）；不要用英文名 class_name',
       },
       search_str: {
         type: 'string',

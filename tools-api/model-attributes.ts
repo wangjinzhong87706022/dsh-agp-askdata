@@ -10,14 +10,14 @@ import { askdataError } from '../src/errors.ts'
 export const modelAttributesTool: AskdataApiTool = {
   name: 'model_attributes',
   description:
-    '查询某个模型的可用属性列表。用户问"模型有哪些字段"或"能查什么属性"时调用。model_name 从 list_models 获取。',
+    '查询某个模型的可用属性列表。用户问"模型有哪些字段"或"能查什么属性"时调用。model_name 必须用中文模型别名（list_models 的 class_alias，如 "水泵模型"），英文名 class_name 会报"模型不存在"。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
     properties: {
       model_name: {
         type: 'string',
-        description: '模型英文名（从 list_models 获取）',
+        description: '中文模型别名（list_models 的 class_alias）；不要用英文名 class_name',
       },
     },
     required: ['model_name'],
