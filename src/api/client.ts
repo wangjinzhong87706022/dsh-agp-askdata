@@ -44,9 +44,6 @@ export interface QueryResult {
   page: { pageNum: number; pageSize: number; pageTotal: number; itemTotal: number }
 }
 
-/** 测点实时值返回。 */
-export type TagRealResult = Record<string, { tagName: string; value?: unknown; timestamp?: string }>
-
 /**
  * AGP REST API 客户端。
  *
@@ -72,12 +69,14 @@ export class ApiClient {
     return this.request<T>('POST', url, JSON.stringify(body))
   }
 
-  /** 获取认证头。 */
+  /** 获取认证头。WT-ROUTER 为网关鉴权中间件的实测必需头（缺它报 00011「登录过期」，2026-09-10 E2E 实证）。 */
   private authHeaders(): Record<string, string> {
     return {
       'WT-TOKEN': this.config.token,
       'WT-OPENID': this.config.openid,
+      'WT-APPID': this.config.projectId,
       'WT-PROJECTID': this.config.projectId,
+      'WT-ROUTER': '#/',
     }
   }
 
@@ -199,12 +198,11 @@ export class ApiClient {
     return this.post<QueryResult>('/wz/meta/postModelDataMeta', body)
   }
 
-  /** 查询测点实时值。 */
-  async getTagRealValues(tagNames: string[]): Promise<TagRealResult> {
-    const data = await this.get<TagRealResult>('/wz/iot-etl/iot/getTagRealValues', {
+  /** 查询测点实时值（20260910 接口版：路径 getIOTTagRealValues，QueryResult 形态）。 */
+  async getTagRealValues(tagNames: string[]): Promise<QueryResult> {
+    return this.get<QueryResult>('/wz/iot-etl/iot/getIOTTagRealValues', {
       tagNames: tagNames.join(','),
     })
-    return data
   }
 
   /** 查询测点历史原始值。 */

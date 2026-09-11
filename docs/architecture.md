@@ -659,3 +659,32 @@ ORDER BY alarm_time DESC LIMIT 5
 
 - `scripts/schema-validate.mjs` 硬编码数据库凭据已随历史提交（违反"凭据不落盘"红线）——待轮换凭据并改环境变量注入。
 - API 面信任边界：`query_model` 的 `whereStr/orderByStr/groupByStr` 为自由查询片段直传网关，插件层无注入校验——待与网关侧确认净化责任后补防线。
+
+## 18. 接口版式 20260910 适配（2026-09-11）
+
+> 依据《基础的数据底座查询接口 20260910.pdf》对 0909 版的逐节比对（`docs/spec` 源目录之外的项目自有差异分析），并以储能水泵项目（模拟量.xlsx，20 个 `*_1O_pump000x` 测点）真实 API 实测验证。探测脚本：`scripts/tsdb-api-probe.mjs`。
+
+### 18.1 接口差异 → 代码变更
+
+| # | 0909 → 0910 差异 | 代码变更 | 落点 |
+|---|---|---|---|
+| 1 | 字段类型码新增 **51 = 时间日期**（52 = 日期型） | `resultFieldType` 将 51/52 均映射 `datetime` | `tools-api/types.ts` |
+| 2 | 实时值接口改名 `getTagRealValues` → **`getIOTTagRealValues`**，返回从对象映射改为 **QueryResult 形态**；且 field 名（`tagname/datetime`）与数据行键（`tagName/time`）大小写不一致 | `tag_real` 切新路径；describe 主分支按行键双名兼容（`tagName??tagname`、`time??datetime`），旧对象映射形态保留为回落分支；client typed 方法同步新路径 | `tools-api/tag-real.ts`、`src/api/client.ts` |
+| 3 | **新增** §2.7 模型分段聚合 `POST /wz/meta/postModelAggrigateData` | 新工具 `query_model_segment`（segment: `[{where_str, title}]`，段缺 title 自动命名"段N"，page_size 钳制） | `tools-api/query-model-segment.ts` |
+| 4 | **新增** 关系分段聚合 `POST /wz/meta/postRelationAggrigateData`（含 left/rightModelName） | 新工具 `query_relation_segment` | `tools-api/query-relation-segment.ts` |
+| 5 | 时序接口明确"endTime 与 sample 同给时 endTime 优先" | `tag_history` 已按此语义（可选参数互斥透传），无需改动 | `tools-api/tag-history.ts` |
+
+API 工具面 8 → **10**；persona 同步（preset/askdata）。
+
+### 18.2 真实 API 实测记录（2026-09-11，储能水泵项目 10462）
+
+| 接口 | 结果 | 备注 |
+|---|---|---|
+| `getIOTTagRealValues` | ✓ | QueryResult 形态；真实值 current=26.66/20.07A、voltage=218.25V（2026-09-10 18:56:00） |
+| `getTagRawHistory`（sample / endTime 两模式） | ✓ | field=[tag,type,value,time(51),comment]，1 分钟间隔，endTime 模式 1440 行/天 |
+| `getWideHistory` | ✓（形态特殊） | 返回 `{type:'history_inter_wide', data:[[]...]}` 非 QueryResult；该项目窗口内无拟合数据 |
+| `getTagAggrigateHistory` | ✗ 网关缺陷 | 任何参数组合（单/多方法、endTime/sample、单/多测点）均 `code=-1 系统内部出现错误`——**服务端问题**，与 TDD 文档历史记录一致；工具层正确收敛为 API_ERROR |
+| `postModelAggrigateData` | ✓ | 分段统计实测返回 20/20，与模拟量.xlsx 测点表吻合；注意 whereStr 字符串值需引号（`类型 = '模拟量'`） |
+| `postRelationAggrigateData` | ✓（可达） | 项目内暂无可用关系名，返回标准错误契约 |
+
+另：鉴权三头实测为 `WT-TOKEN / WT-OPENID / WT-ROUTER`（`WT-APPID`/`WT-PROJECTID` 可选带）；缺 `WT-ROUTER` 时网关误报 `00011 登录过期`（§17.1 已修复）。

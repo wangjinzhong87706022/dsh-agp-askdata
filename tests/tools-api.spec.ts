@@ -63,12 +63,11 @@ const queryResult = (overrides?: Partial<{ field: unknown[]; data: unknown[]; pa
 })
 
 describe('单次执行语义（管线不重放第二次请求）', () => {
-  it('全部 8 个工具各恰好发起一次 HTTP 调用', async () => {
+  it('全部 10 个工具各恰好发起一次 HTTP 调用', async () => {
     const respond = (call: RecordedCall): unknown => {
       if (call.path.includes('getModelList')) return { field: [], data: [{ id: 1 }] }
-      if (call.path.includes('getTagRealValues')) return { A_1O_D1: { value: '1', timestamp: 't' } }
+      if (call.path.includes('getIOTTagRealValues')) return { field: [], data: [{ value: 1, time: 't', tagName: 'A' }] }
       if (call.path.includes('getModelBasAttributes')) return { field: [{ name: 'f', type: '4' }] }
-      if (call.path.includes('postModelDataMeta')) return queryResult()
       return queryResult()
     }
     for (const t of apiTools) {
@@ -76,6 +75,16 @@ describe('单次执行语义（管线不重放第二次请求）', () => {
         list_models: {},
         model_attributes: { model_name: 'm' },
         query_model: { model_name: 'm' },
+        query_model_segment: {
+          model_name: 'm',
+          search_str: '姓名,count(*) as 计数',
+          segment: [{ where_str: '年龄 > 20', title: '青年' }],
+        },
+        query_relation_segment: {
+          relation_name: '组织和用户的关系',
+          search_str: '组织名称,count(*) as 计数',
+          segment: [{ where_str: '年龄 > 20', title: '青年' }],
+        },
         resolve_tag: { keyword: '水位' },
         tag_real: { tag_names: ['A_1O_D1'] },
         tag_history: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', end_time: '2024-08-15 00:00:00' },
@@ -135,22 +144,111 @@ describe('请求路由与参数组装', () => {
     const quoted = await tool('resolve_tag').run({ keyword: "a'b" }, testContext(() => queryResult()).ctx)
     expect(quoted.errorCode).toBe('INVALID_PARAM')
   })
-  it('tag_real：GET 请求；对象映射响应 shape 成行', async () => {
+  it('tag_real：20260910 新接口 QueryResult 形态（行键与 field 名不一致，双键名兼容）', async () => {
     const { ctx, calls } = testContext(() => ({
-      A_1O_D1: { value: '12.5', timestamp: '2024-08-14 10:00:00' },
+      field: [
+        { name: 'tagname', title: '测点代码', type: '3' },
+        { name: 'datetime', title: '时间戳', type: '51' },
+        { name: 'value', title: '数值', type: '22' },
+        { name: 'quality', title: '数据质量', type: '11' },
+      ],
+      data: [
+        { value: 20.07, time: '2026-09-10 18:56:00', tagName: 'current_1O_pump0002', comment: '第二台水泵电流' },
+      ],
+    }))
+    const result = await tool('tag_real').run({ tag_names: ['current_1O_pump0002'] }, ctx)
+    expect(result.success).toBe(true)
+    expect(calls[0]).toMatchObject({
+      method: 'GET',
+      path: '/wz/iot-etl/iot/getIOTTagRealValues',
+      params: { tagNames: ['current_1O_pump0002'] },
+    })
+    expect(result.fields.map((f) => f.type)).toEqual(['string', 'number', 'datetime', 'string'])
+    expect(result.data[0]).toEqual({
+      tagName: 'current_1O_pump0002',
+      value: 20.07,
+      timestamp: '2026-09-10 18:56:00',
+      comment: '第二台水泵电流',
+    })
+  })
+  it('tag_real：旧 getTagRealValues 对象映射形态回落兼容', async () => {
+    const { ctx } = testContext(() => ({
+      A_1O_D1: { value: '12.5', time: '2024-08-14 10:00:00', tagName: 'A_1O_D1' },
       B_1O_D2: {},
     }))
     const result = await tool('tag_real').run({ tag_names: ['A_1O_D1', 'B_1O_D2'] }, ctx)
     expect(result.success).toBe(true)
-    expect(calls[0]).toMatchObject({
-      method: 'GET',
-      path: '/wz/iot-etl/iot/getTagRealValues',
-      params: { tagNames: ['A_1O_D1', 'B_1O_D2'] },
-    })
     expect(result.data).toEqual([
-      { tagName: 'A_1O_D1', value: 12.5, timestamp: '2024-08-14 10:00:00' },
-      { tagName: 'B_1O_D2', value: null, timestamp: null },
+      { tagName: 'A_1O_D1', value: 12.5, timestamp: '2024-08-14 10:00:00', comment: null },
+      { tagName: 'B_1O_D2', value: null, timestamp: null, comment: null },
     ])
+  })
+  it('query_model_segment：POST body 携带 segment 分段定义', async () => {
+    const { ctx, calls } = testContext(() => queryResult({
+      field: [
+        { name: '分段', title: '分段', type: '3' },
+        { name: '计数', title: '计数', type: '11' },
+      ],
+      data: [
+        { 分段: '大于20小于40岁', 计数: 12 },
+        { 分段: '40到60之间', 计数: 34 },
+      ],
+    }))
+    const result = await tool('query_model_segment').run(
+      {
+        model_name: '职工基础模型',
+        search_str: '姓名,count(*) as 计数',
+        segment: [
+          { where_str: '年龄 > 20 and 年龄 < 40', title: '大于20小于40岁' },
+          { where_str: '年龄 >= 40 and 年龄 < 60', title: '40到60之间' },
+        ],
+      },
+      ctx,
+    )
+    expect(result.success).toBe(true)
+    expect(calls[0]).toMatchObject({
+      method: 'POST',
+      path: '/wz/meta/postModelAggrigateData',
+      params: {
+        modelName: '职工基础模型',
+        searchStr: '姓名,count(*) as 计数',
+        segment: [
+          { whereStr: '年龄 > 20 and 年龄 < 40', title: '大于20小于40岁' },
+          { whereStr: '年龄 >= 40 and 年龄 < 60', title: '40到60之间' },
+        ],
+      },
+    })
+    expect(result.data[0]).toEqual({ 分段: '大于20小于40岁', 计数: 12 })
+  })
+  it('query_model_segment：segment 缺失或空 → INVALID_PARAM 且不触达执行器', async () => {
+    const { ctx, calls } = testContext(() => queryResult())
+    expect((await tool('query_model_segment').run({ model_name: 'm', search_str: 'x' }, ctx)).errorCode).toBe('INVALID_PARAM')
+    expect((await tool('query_model_segment').run({ model_name: 'm', search_str: 'x', segment: [{ title: '无条件' }] }, ctx)).errorCode).toBe('INVALID_PARAM')
+    expect(calls).toHaveLength(0)
+  })
+  it('query_relation_segment：POST body 携带 relationName 与左右模型', async () => {
+    const { ctx, calls } = testContext(() => queryResult())
+    const result = await tool('query_relation_segment').run(
+      {
+        relation_name: '组织和用户的关系',
+        search_str: '组织名称,count(*) as 计数',
+        right_model_name: '职工基础模型',
+        segment: [{ where_str: '年龄 > 20' }],
+      },
+      ctx,
+    )
+    expect(result.success).toBe(true)
+    expect(calls[0]).toMatchObject({
+      method: 'POST',
+      path: '/wz/meta/postRelationAggrigateData',
+      params: {
+        relationName: '组织和用户的关系',
+        leftModelName: '',
+        rightModelName: '职工基础模型',
+      },
+    })
+    // 无 title 的段自动命名
+    expect((calls[0]!.params.segment as Array<{ title: string }>)[0]!.title).toBe('段1')
   })
   it('tag_aggregate：路径为网关官方拼写 Aggrigate，methods 以数组透传（序列化归 ApiClient）', async () => {
     const { ctx, calls } = testContext(() => queryResult())
@@ -256,10 +354,10 @@ describe('入参校验与错误映射', () => {
 })
 
 describe('ApiClient GET 序列化', () => {
-  it('数组参数逗号连接、标量 String 化；URL 由 baseUrl+apiPrefix+path 组装', async () => {
-    const captured: string[] = []
-    vi.stubGlobal('fetch', async (url: string | URL) => {
-      captured.push(String(url))
+  it('数组参数逗号连接、标量 String 化；URL 与鉴权头（含网关必需的 WT-ROUTER）正确组装', async () => {
+    const captured: Array<{ url: string; headers: Record<string, string> }> = []
+    vi.stubGlobal('fetch', async (url: string | URL, init?: { headers?: Record<string, string> }) => {
+      captured.push({ url: String(url), headers: init?.headers ?? {} })
       return new Response(JSON.stringify({ code: 0, message: '', data: {}, timestamp: 0, executeTime: 0 }), { status: 200 })
     })
     try {
@@ -276,9 +374,16 @@ describe('ApiClient GET 序列化', () => {
         tagNames: ['a_1O_1', 'b_1O_2'],
         n: 5,
       })
-      expect(captured[0]).toBe(
+      expect(captured[0]!.url).toBe(
         'https://api.example.com/s1M6_uE9/wz/iot-etl/iot/getTagRealValues?tagNames=a_1O_1%2Cb_1O_2&n=5',
       )
+      expect(captured[0]!.headers).toMatchObject({
+        'WT-TOKEN': 'tok',
+        'WT-OPENID': 'oid',
+        'WT-APPID': 'pid',
+        'WT-PROJECTID': 'pid',
+        'WT-ROUTER': '#/',
+      })
     } finally {
       vi.unstubAllGlobals()
     }
@@ -290,7 +395,7 @@ describe('审计', () => {
     const { ctx, audits } = testContext(() => ({ A: { value: '1' } }))
     const result = await tool('tag_real').run({ tag_names: ['A'] }, ctx)
     expect(audits).toHaveLength(1)
-    expect(audits[0]!.sqlText).toBe('GET API /wz/iot-etl/iot/getTagRealValues')
+    expect(audits[0]!.sqlText).toBe('GET API /wz/iot-etl/iot/getIOTTagRealValues')
     expect(audits[0]!.toolName).toBe('tag_real')
     expect(result.auditId).toBe(audits[0]!.auditId)
   })

@@ -108,10 +108,10 @@ export function validateTagNamesArg(value: unknown): string[] {
   })
 }
 
-/** AGP 模型字段类型码 → ResultField.type（'1'/'11'/'22' 数值、'52' datetime，其余 string）。 */
+/** AGP 模型字段类型码 → ResultField.type（'1'/'11'/'22' 数值、'51' 时间日期 / '52' 日期，其余 string）。 */
 function resultFieldType(type: string): ResultField['type'] {
   if (type === '1' || type === '11' || type === '22') return 'number'
-  if (type === '52') return 'datetime'
+  if (type === '51' || type === '52') return 'datetime'
   return 'string'
 }
 
