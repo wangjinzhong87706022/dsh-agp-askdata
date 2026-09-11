@@ -744,3 +744,29 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 - 探测脚本全参数化：`tsdb-api-probe.mjs` **7/7 通过**、`meta-api-probe.mjs` 全参调用（含 2.1/2.4）。Windows curl 命令行中文参数 GBK 乱码会产生"没有找到模型"假错误——探测一律走 Node UTF-8 脚本。
 
 **给 AGP 侧的最终清单**：① 各数据查询接口"缺参数报 -1 系统内部出现错误"应改为明确的参数校验错误（现在只有个别参数报 `code=1`）；② `getTagAggrigateHistory` 间歇性 -1（全参数亦然）待查服务稳定性；③ 时序接口无鉴权即读数（错 token 同样返回数据）。
+
+### 18.6 API-only 收口 + 工具层端到端测试（2026-09-11 10:30）
+
+**决策：本版本智能问数只走 API。** `dsh-agp-askdata/tools` 行改为仅注册 10 个 API 工具，SQL 工具面（12 个）保留在服务编程接口（`service.tools`）但不再注册进 DSH——取数统一收口 API 网关。persona 同步为 API-only。
+
+**工具层端到端**（`scripts/e2e-api-tools.ts`，真实 API、工具全路径、含审计链）：以模拟量.xlsx 的 20 个测点（current/voltage/temp/power/electric × pump0001-0004）为用例：
+
+| # | 用例 | 结果 |
+|---|---|---|
+| 1 | list_models 模型清单（233 个，含模拟量模型） | ✓ |
+| 2 | model_attributes 模型属性（38 个字段） | ✓（实测 QueryResult 形态：field=列定义、data=属性行；已修 describe） |
+| 3 | query_model 测点信息全量 | ✓ 20 行与 xlsx 完全一致 |
+| 4 | query_model 条件查询（测点编码 like current%） | ✓ 4 行 |
+| 5 | query_model_segment 分段汇总 | ✓ 两段各 20 |
+| 6 | tag_real 实时值（4 台水泵电流） | ✓ 20.07/26.66/25.74/14.69 |
+| 7 | tag_history 历史原始值 | ✓ 10 行 |
+| 8 | tag_wide 宽格式 | ✓（空宽表；history_inter_wide 包装形态已正确处理为空结果） |
+| 9 | tag_aggregate 统计汇总 | ⚠ 网关抖动窗口 -1（同参数 10:12 已实测成功并取得 history_inter 数据，工具解释已实现） |
+| 10 | resolve_tag 中文反查 | ✓ 优雅报 MODEL_NOT_FOUND（该项目测点登记在模拟量模型而非 wt_iot_tags，反查走 query_model） |
+| 11 | 审计哈希链跨调用衔接 | ✓ 9 次落审计，首条 prevHash 空、resultHash 64 位 |
+
+**客户端修正**（E2E 逼出）：`ApiClient` 改为先 `text()` 后解析——旧代码 `json()` 失败后再 `text()` 会因 body 已消费二次抛错，把真实错误体掩盖成"响应体不可读"；空响应体单独报 `API_ERROR`（常见于模型不存在）。
+
+**抖动确认（四接口同步对照轮询，15s×4 轮）**：历史原始值/统计值/模型分段聚合三个"做实际计算"的接口同步 -1，实时值（查缓存）恒 0——与 §18.3 漂移同源，属网关计算服务稳定性问题，参数与凭证均无关（全参数调用在可用窗口实测成功）。
+
+**测点表放置结论**：模拟量.xlsx 的正确位置是 **AGP 平台的模型库**（已作为「模拟量模型」导入，插件经 query_model 实时读取，无需文件副本）；xlsx 本身是建模导入模板，含真实资产信息，**不入 git**（如需归档放上游 spec 源目录）；离线测试夹具如需要，放脱敏子集于 `tests/fixtures/`。

@@ -2,6 +2,8 @@
 
 AGP TSDB / Database 智能问数的 DSH 插件（P0：StarRocks TSDB 面）。
 
+> **本分支（feature/schema-validation）智能问数只走 AGP REST API**（`/s1M6_uE9/wz/`，10 个 API 工具：模型查询/分段聚合/测点实时与历史/统计值）。SQL 工具面（StarRocks/MySQL 直连 12 工具）保留在服务编程接口（`service.tools`）中，但**不在 DSH 注册**——取数统一收口 API 网关。
+
 自然语言提问 → LLM 选择固定语义 Tool（模板化 SQL，禁止自由拼 SQL）→ 基础库白名单校验 → 扫描护栏 → StarRocks 查询 → AGP 标准结构化返回 + 审计哈希链。
 
 ## 状态：P0 + P1

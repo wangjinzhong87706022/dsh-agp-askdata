@@ -6,7 +6,7 @@
  * @module
  */
 
-import { askdataError } from '../errors.ts'
+import { askdataError, AskdataError } from '../errors.ts'
 import type { ApiConfig } from '../config.ts'
 
 /** API 统一返回结构。 */
@@ -127,13 +127,24 @@ export class ApiClient {
         throw askdataError('API_HTTP_ERROR', `HTTP ${resp.status}: ${resp.statusText}`)
       }
 
-      // 解析 JSON 响应
+      // 解析 JSON 响应（先读文本：部分接口在模型不存在等场景返回 200+空响应体）
+      let text: string
       try {
-        const j = await resp.json() as ApiResponse<T>
+        text = await resp.text()
+      } catch {
+        throw askdataError('API_ERROR', `API 响应体不可读: ${resp.status} ${resp.statusText}`)
+      }
+      if (!text.trim()) {
+        throw askdataError(
+          'API_ERROR',
+          `API 返回空响应体(HTTP ${resp.status})——常见于请求的模型/关系在本项目不存在: ${path(url)}`,
+        )
+      }
+      try {
+        const j = JSON.parse(text) as ApiResponse<T>
         return this.handleResponse(j)
       } catch (e) {
-        // 非 JSON 响应（如 502 HTML 错误页）
-        const text = await resp.text().catch(() => '(无法读取响应体)')
+        if (e instanceof AskdataError) throw e
         throw askdataError('API_ERROR', `API 返回非 JSON 响应: ${resp.status} ${resp.statusText}，响应体: ${text.slice(0, 200)}`)
       }
     }

@@ -32,10 +32,13 @@ export const modelAttributesTool: AskdataApiTool = {
           params: { modelName },
         },
         describe: (raw) => {
-          // 兼容两种响应形态：{field: [...]} 包装或属性数组直出
-          const rows = Array.isArray(raw)
-            ? (raw as Record<string, unknown>[])
-            : ((raw as { field?: Record<string, unknown>[] }).field ?? [])
+          // 实测形态为 QueryResult：field=列定义，data=属性行（2026-09-11 修正）
+          const qr = raw as { data?: Record<string, unknown>[]; field?: Record<string, unknown>[] }
+          const rows = Array.isArray(qr?.data)
+            ? qr.data
+            : Array.isArray(raw)
+              ? (raw as Record<string, unknown>[])
+              : (qr?.field ?? [])
           return {
             fields: [
               { name: 'field_name', title: '字段名', type: 'string' },

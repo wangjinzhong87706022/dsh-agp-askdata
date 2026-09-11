@@ -6,6 +6,20 @@
 import { describeQueryResult, runApiTool, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
+/**
+ * 宽格式响应解释：实测为 `{type:'history_inter_wide', data:[[行...],...]}` 包装
+ * （每段 data 对应一个测点）；包装形态下仅当行是对象时扁平化，否则返回空结果。
+ */
+function describeWide(raw: unknown): { fields: import('../src/result.ts').ResultField[]; data: Record<string, unknown>[] } {
+  const wrapped = raw as { type?: string; data?: unknown[] } | undefined
+  if (wrapped && typeof wrapped === 'object' && typeof wrapped.type === 'string' && Array.isArray(wrapped.data)) {
+    const inner = wrapped.data.filter((g): g is Record<string, unknown>[] => Array.isArray(g))
+    const rows = inner.flatMap((g) => g).filter((r): r is Record<string, unknown> => r !== null && typeof r === 'object')
+    return { fields: [], data: rows }
+  }
+  return describeQueryResult(raw)
+}
+
 /** tag_wide 工具定义。 */
 export const tagWideTool: AskdataApiTool = {
   name: 'tag_wide',
@@ -65,7 +79,7 @@ export const tagWideTool: AskdataApiTool = {
             ...(args.date_format ? { dateFormat: String(args.date_format) } : {}),
           },
         },
-        describe: describeQueryResult,
+        describe: describeWide,
       }
     })
   },

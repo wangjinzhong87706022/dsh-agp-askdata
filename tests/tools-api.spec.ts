@@ -320,10 +320,17 @@ describe('describe 类型化与分页', () => {
     const result = await tool('list_models').run({}, ctx)
     expect(result.data[0]).toMatchObject({ id: 7, class_alias: '逆变器' })
   })
-  it('model_attributes 兼容 {field} 包装与数组直出两种响应', async () => {
-    const wrapped = testContext(() => ({ field: [{ field_name: 'age', field_description: '年龄', field_type: 'int' }] }))
+  it('model_attributes：实测 QueryResult 形态（field=列定义，data=属性行）', async () => {
+    const wrapped = testContext(() => ({
+      field: [
+        { name: 'field_name', title: '属性名称', type: '3' },
+        { name: 'field_description', title: '描述', type: '3' },
+        { name: 'field_type', title: '属性类型', type: '11' },
+      ],
+      data: [{ field_name: 'tagname', field_description: '测点编码', field_type: '3' }],
+    }))
     const r1 = await tool('model_attributes').run({ model_name: 'staff' }, wrapped.ctx)
-    expect(r1.data[0]).toEqual({ field_name: 'age', field_description: '年龄', field_type: 'int' })
+    expect(r1.data[0]).toEqual({ field_name: 'tagname', field_description: '测点编码', field_type: '3' })
     expect(wrapped.calls[0]).toMatchObject({
       method: 'GET',
       path: '/wz/meta/getModelBasAttributes',
