@@ -89,15 +89,17 @@ const TAGS = ['current_1O_pump0001', 'current_1O_pump0002', 'voltage_1O_pump0001
   report('getWideHistory 宽格式(interval=3600s)', j.code === 0, brief(j))
 }
 
-// 5. 历史统计值
+// 5. 历史统计值（网关要求 6 参数全传：endTime+sample 并存以 endTime 为准，params 空串占位）
 {
   const j = await get('/wz/iot-etl/iot/getTagAggrigateHistory', {
     tagNames: 'current_1O_pump0001',
     startTime: '2026-09-09 00:00:00',
     endTime: '2026-09-10 00:00:00',
+    sample: '10',
     methods: 'max,min,mean,count',
+    params: '',
   })
-  report('getTagAggrigateHistory 统计值(max/min/mean/count)', j.code === 0, brief(j))
+  report('getTagAggrigateHistory 统计值(6参数全传)', j.code === 0, brief(j))
 }
 
 // 6. 模型分段聚合（20260910 新增 §2.7）

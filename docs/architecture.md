@@ -723,13 +723,24 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 
 **规律**：元数据/属性类接口（2.3/2.6/3.1）全部正常；**数据行查询类接口中，POST 全部正常，GET 大面积 -1**（2.1 vs 2.2、2.4 vs 2.5 两组同能力对照均如此）。结合 §18.3 的时变漂移，指向服务端数据查询服务（尤其 GET 查询路径）的部署/会话层缺陷。建议 AGP 侧优先核对 GET 查询路径（`getModelDataMeta`/`getRelationDataMeta`/`getTag*History`）与服务端日志。
 
-### 18.5 AGP 侧修复后回归验证（2026-09-11 09:40）
+### 18.5 根因修正：`-1` 的真正规则是"参数必须全传"（2026-09-11 09:40–10:00）
 
-AGP 通知后台恢复后重跑两个探测脚本，结果**精确分层**：
+> 用户指出 getModelDataMeta 此前调通过——关键在**所有参数必须传（值可为空串）**，与 commit 118108f 的 postModelDataMeta 教训（7 参数全传，缺任一报 -1）同源。据此重测，**§18.4 表中四个"失败"接口全部打通**，"持续性缺陷"结论作废。
 
-| 分组 | 接口 | 修复后状态 |
+实测确认的参数规则（`scripts/full-params-verify.mjs`，已并入两个探测脚本）：
+
+| 接口 | 全参数要求 | 验证结果 |
 |---|---|---|
-| 时变漂移组（§18.3 故障） | 3.2 getTagRawHistory / 3.3 getWideHistory | **✓ 已恢复**（raw 两模式各 10/1440 行；wide code=0 特殊空宽表形态） |
-| 持续故障组（首次测试即 -1，修复后依旧） | 2.1 getModelDataMeta GET（executeTime≈97ms）/ 2.4 getRelationDataMeta GET（≈108ms）/ 3.4 getTagAggrigateHistory / 2.7b postRelationAggrigateData | **✗ 仍 -1** |
+| 2.1 getModelDataMeta GET | 7 参数：modelName/searchStr/whereStr/pageNum/pageSize/orderByStr/groupByStr | ✓ code=0 返回模型数据 |
+| 2.4 getRelationDataMeta GET | 9 参数（+leftModelName/rightModelName，空串占位） | ✓ code=0 返回关系数据 |
+| 3.4 getTagAggrigateHistory GET | 6 参数：tagNames/startTime/**endTime 与 sample 至少其一**/methods/**params（空串占位）**；缺 sample 报 `code=1 参数[sample]不合法`，缺 params 报 -1 | ✓ code=0，返回 `{type:'history_inter', data:{tag:[行]}}` **包装形态**（非 QueryResult） |
+| 2.7b postRelationAggrigateData POST | body 全字段（含 orderByStr/groupByStr/leftModelName/rightModelName/pageNum/pageSize） | ✓ code=0 分段计数 |
 
-结论：本次恢复只修复了 §18.3 的时变漂移（历史查询服务的会话/资源类故障）；**2.1、2.4、3.4、2.7b 四个接口属另一类持续性缺陷**（首次接入即不可用，与凭证、参数、时间窗无关，fail-fast 毫秒级），推测为该部署未装配对应查询能力或代码缺陷，需 AGP 侧按 §18.4 矩阵单独排查。我方探测脚本保留，修复后重跑即可回归。
+**残余问题（真实存在，量级收窄）**：服务稳定性抖动——同一全参数调用在 09:32 成功、09:45 起三连 -1、之后又恢复（§18.3 的 raw/wide 漂移同源）。这是网关侧可用性问题，非参数/凭证问题；工具层已把该形态收敛为 `API_ERROR` 契约。
+
+**代码修正**：
+- `tools-api/tag-aggregate.ts`：参数恒全传（`params` 空串占位）、`end_time 与 sample 至少提供一个`入参校验（网关实测要求，0910 文档未写明）、新增 `describeAggrigateHistory` 解释 `history_inter` 包装形态（行扁平化 + tagName 回填 + 数值化），QueryResult 形态回落。
+- `tag_wide` 描述按实测修正（endTime/sample 至少其一，§18.3）。
+- 探测脚本全参数化：`tsdb-api-probe.mjs` **7/7 通过**、`meta-api-probe.mjs` 全参调用（含 2.1/2.4）。Windows curl 命令行中文参数 GBK 乱码会产生"没有找到模型"假错误——探测一律走 Node UTF-8 脚本。
+
+**给 AGP 侧的最终清单**：① 各数据查询接口"缺参数报 -1 系统内部出现错误"应改为明确的参数校验错误（现在只有个别参数报 `code=1`）；② `getTagAggrigateHistory` 间歇性 -1（全参数亦然）待查服务稳定性；③ 时序接口无鉴权即读数（错 token 同样返回数据）。

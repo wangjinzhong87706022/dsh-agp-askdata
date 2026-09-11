@@ -89,7 +89,7 @@ describe('单次执行语义（管线不重放第二次请求）', () => {
         tag_real: { tag_names: ['A_1O_D1'] },
         tag_history: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', end_time: '2024-08-15 00:00:00' },
         tag_wide: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', interval: 60 },
-        tag_aggregate: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', methods: ['max', 'min'] },
+        tag_aggregate: { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', end_time: '2024-08-15 00:00:00', methods: ['max', 'min'] },
       }[t.name] ?? {}
       const { ctx, calls } = testContext(respond)
       const result = await t.run(args, ctx)
@@ -250,8 +250,15 @@ describe('请求路由与参数组装', () => {
     // 无 title 的段自动命名
     expect((calls[0]!.params.segment as Array<{ title: string }>)[0]!.title).toBe('段1')
   })
-  it('tag_aggregate：路径为网关官方拼写 Aggrigate，methods 以数组透传（序列化归 ApiClient）', async () => {
-    const { ctx, calls } = testContext(() => queryResult())
+  it('tag_aggregate：路径为网关官方拼写 Aggrigate，params 恒传（空串占位），可选参数透传', async () => {
+    const { ctx, calls } = testContext(() => ({
+      type: 'history_inter',
+      data: {
+        current_1O_pump0001: [
+          { tag: 'current_1O_pump0001', type: 'ANALOG', time: '2026-09-09 00:00:00', value: '5.5', comment: '第一台水泵电流' },
+        ],
+      },
+    }))
     const result = await tool('tag_aggregate').run(
       { tag_names: ['A_1O_D1'], start_time: '2024-08-14 00:00:00', methods: ['max', 'mean'], sample: 10, params: 'p=50' },
       ctx,
@@ -262,6 +269,17 @@ describe('请求路由与参数组装', () => {
       path: '/wz/iot-etl/iot/getTagAggrigateHistory',
       params: { tagNames: ['A_1O_D1'], methods: ['max', 'mean'], sample: 10, params: 'p=50' },
     })
+    // history_inter 包装形态：行扁平化并回填 tagName
+    expect(result.data[0]).toMatchObject({ tagName: 'current_1O_pump0001', value: 5.5 })
+  })
+  it('tag_aggregate：end_time 与 sample 均缺省 → INVALID_PARAM（网关要求参数全传）', async () => {
+    const { ctx, calls } = testContext(() => queryResult())
+    const result = await tool('tag_aggregate').run(
+      { tag_names: ['A'], start_time: '2024-08-14 00:00:00', methods: ['max'] },
+      ctx,
+    )
+    expect(result.errorCode).toBe('INVALID_PARAM')
+    expect(calls).toHaveLength(0)
   })
   it('tag_history / tag_wide：end_time 与 sample 互斥透传', async () => {
     const { ctx, calls } = testContext(() => queryResult())

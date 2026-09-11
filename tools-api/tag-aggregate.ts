@@ -6,7 +6,7 @@
  * @module
  */
 
-import { describeQueryResult, runApiTool, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
+import { describeQueryResult, runApiTool, toNumber, toString, validatePositiveInt, validateTagNamesArg, type AskdataApiTool, type ApiToolContext } from './types.ts'
 import { askdataError } from '../src/errors.ts'
 
 /** 16 种统计方法枚举。 */
@@ -22,7 +22,7 @@ const AGGREGATE_METHODS = [
 export const tagAggregateTool: AskdataApiTool = {
   name: 'tag_aggregate',
   description:
-    '查询测点的历史统计值。methods 可选: max/min/mean/rms/count/stddeviation/percentile50 等。时间格式：2023-12-30 01:22:22',
+    '查询测点的历史统计值。methods 可选: max/min/mean/rms/count/stddeviation/percentile50 等。时间格式：2023-12-30 01:22:22。end_time 与 sample 至少提供一个（同给时 end_time 优先）。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
@@ -43,11 +43,11 @@ export const tagAggregateTool: AskdataApiTool = {
       },
       end_time: {
         type: 'string',
-        description: '结束时间（与 sample 互斥）',
+        description: '结束时间；end_time 与 sample 至少提供一个（同给时 end_time 优先）',
       },
       sample: {
         type: 'integer',
-        description: '样本数（与 end_time 互斥）',
+        description: '样本数；end_time 与 sample 至少提供一个（同给时 end_time 优先）',
       },
       params: {
         type: 'string',
@@ -71,9 +71,15 @@ export const tagAggregateTool: AskdataApiTool = {
           throw askdataError('INVALID_PARAM', `未知统计方法: ${m}，可选: ${AGGREGATE_METHODS.join(', ')}`)
         }
       }
+      // 网关要求参数全传：endTime 与 sample 至少提供一个（同给时 endTime 优先），
+      // params 恒传（空串占位）——缺任一参数报 -1「系统内部出现错误」（2026-09-11 实测）
+      const endTime = args.end_time ? String(args.end_time) : undefined
       const sample = args.sample !== undefined && args.sample !== null && args.sample !== ''
         ? validatePositiveInt(args.sample, 'sample')
         : undefined
+      if (endTime === undefined && sample === undefined) {
+        throw askdataError('INVALID_PARAM', 'end_time 与 sample 至少提供一个')
+      }
 
       return {
         request: {
@@ -82,13 +88,51 @@ export const tagAggregateTool: AskdataApiTool = {
             tagNames,
             startTime,
             methods,
-            ...(args.end_time ? { endTime: String(args.end_time) } : {}),
+            params: args.params ? String(args.params) : '',
+            ...(endTime !== undefined ? { endTime } : {}),
             ...(sample !== undefined ? { sample } : {}),
-            ...(args.params ? { params: String(args.params) } : {}),
           },
         },
-        describe: describeQueryResult,
+        describe: describeAggrigateHistory,
       }
     })
   },
+}
+
+/**
+ * 统计值响应解释：主形态为 `{type:'history_inter', data:{tagName: [行...]}}`
+ * 包装（2026-09-11 实测），QueryResult 形态回落。
+ */
+export function describeAggrigateHistory(raw: unknown): { fields: import('../src/result.ts').ResultField[]; data: Record<string, unknown>[] } {
+  const wrapped = raw as { type?: string; data?: Record<string, Record<string, unknown>[]> } | undefined
+  if (wrapped && typeof wrapped === 'object' && wrapped.type === 'history_inter' && wrapped.data && !Array.isArray(wrapped.data)) {
+    const rows: Record<string, unknown>[] = []
+    for (const [tagName, list] of Object.entries(wrapped.data)) {
+      for (const row of list ?? []) {
+        rows.push({
+          tagName,
+          tag: toString(row.tag),
+          type: toString(row.type),
+          time: toString(row.time),
+          value: toNumber(row.value),
+          comment: toString(row.comment),
+        })
+      }
+    }
+    return {
+      fields: [
+        { name: 'tagName', title: '测点代码', type: 'string' },
+        { name: 'type', title: '测点类型', type: 'string' },
+        { name: 'time', title: '统计窗', type: 'datetime' },
+        { name: 'value', title: '统计值', type: 'number' },
+        { name: 'comment', title: '测点名称', type: 'string' },
+      ],
+      data: rows,
+    }
+  }
+  // QueryResult 形态回落（field + data）
+  if (raw && typeof raw === 'object' && Array.isArray((raw as { field?: unknown }).field)) {
+    return describeQueryResult(raw)
+  }
+  return { fields: [], data: [] }
 }
