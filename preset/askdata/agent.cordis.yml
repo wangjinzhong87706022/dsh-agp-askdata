@@ -29,7 +29,7 @@
 
 # ── askdata tools ───────────────────────────────────────────────────────────
 
-# P0+P1 共 11 工具经本行注册；行只消费宿主服务（tools + askdata），满足 preset 守卫。
+# P0+P1+subagent 共 12 工具经本行注册；行只消费宿主服务（tools + askdata），满足 preset 守卫。
 # 连接与护栏配置在宿主行 `dsh-agp-askdata` 的 Config（cordis.patch.yml）。
 - id: askdata-tools
   name: 'dsh-agp-askdata/tools'

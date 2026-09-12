@@ -1,7 +1,8 @@
 # The dsh-agp-askdata bundle patch: activates the plugin as a profile layer.
 #
 # P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
-# tools (11 in total). The `askdata` row mounts the plugin service (config,
+# tools (12 in total, incl. the subagent-style askdata_deep_analysis). The
+# `askdata` row mounts the plugin service (config,
 # clients, validation gate, audit chain). The `askdata-routes` web row and the
 # TSDB HTTP gateway tools join in P2.
 #

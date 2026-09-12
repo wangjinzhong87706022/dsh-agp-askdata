@@ -40,7 +40,7 @@
     {
       "target": "database-clients",
       "kind": "native",
-      "description": "StarRocks access runs through the external mysql CLI client; the plugin never embeds database credentials in argv"
+      "description": "StarRocks access defaults to the mysql2 driver (text protocol) with an external mysql CLI client as the fallback channel; the plugin never embeds database credentials in argv"
     }
   ]
 }

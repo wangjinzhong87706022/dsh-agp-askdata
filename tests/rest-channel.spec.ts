@@ -9,6 +9,7 @@ import { resolveConfig, type AskdataConfig } from '../src/config.ts'
 import type { SqlExecutor, ToolContext } from '../tools/types.ts'
 import type { QueryOutput } from '../src/clients/starrocks.ts'
 import { allTools } from '../tools/index.ts'
+import { byIncludes } from './helpers.ts'
 
 function restConfig(restOverrides: Record<string, unknown> = {}): AskdataConfig {
   return resolveConfig({
@@ -162,10 +163,3 @@ describe('latest_value 通道选择', () => {
   })
 })
 
-function byIncludes(map: Array<[string, QueryOutput]>): (sql: string) => QueryOutput {
-  return (sql) => {
-    const hit = map.find(([needle]) => sql.includes(needle))
-    if (!hit) throw new Error(`fake executor: 未匹配的 SQL: ${sql.slice(0, 80)}`)
-    return hit[1]
-  }
-}

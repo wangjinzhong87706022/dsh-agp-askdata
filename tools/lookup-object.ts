@@ -8,6 +8,7 @@
 import { runSqlTool, toNumber, type AskdataTool, type ToolContext } from './types.ts'
 import { lookupObjectSql } from '../src/sql/templates.ts'
 import { validateFilterText, validateLimit } from '../src/sql/validate.ts'
+import { askdataError } from '../src/errors.ts'
 
 /** lookup_object 工具定义。 */
 export const lookupObjectTool: AskdataTool = {
@@ -36,10 +37,14 @@ export const lookupObjectTool: AskdataTool = {
         const nodeName = args.node_name
           ? validateFilterText(String(args.node_name), 'node_name')
           : undefined
-        const parentId =
-          args.parent_id !== undefined && args.parent_id !== null
-            ? Number(args.parent_id)
-            : undefined
+        let parentId: number | undefined
+        if (args.parent_id !== undefined && args.parent_id !== null) {
+          const n = Number(args.parent_id)
+          if (!Number.isSafeInteger(n)) {
+            throw askdataError('INVALID_PARAM', `parent_id 必须是整数: ${String(args.parent_id)}`)
+          }
+          parentId = n
+        }
         const limit = validateLimit(args.limit, ctx.config.system, ctx.config.system.defaultLookupLimit)
         const sql = lookupObjectSql(ctx.config, {
           appId: ctx.config.appId,

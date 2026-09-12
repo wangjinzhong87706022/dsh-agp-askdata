@@ -94,7 +94,12 @@ export function bucketExpression(bucket: TimeBucket): string {
   }
 }
 
-/** time_series：时序明细 / 时间桶聚合（§3.2）。别名一律反引号（`maxValue` 撞保留字 MAXVALUE，e2e 实证）。 */
+/**
+ * time_series：时序明细 / 时间桶聚合（§3.2）。别名一律反引号（`maxValue` 撞保留字 MAXVALUE，e2e 实证）。
+ *
+ * @deprecated 生产路径已由 `timeSeriesByTagIndexSql`（IN 子查询版，§14.10）取代；
+ * 保留作为 §3.2 LEFT JOIN 版规格对照与守卫样张，勿在新代码中引用。
+ */
 export function timeSeriesSql(
   config: AskdataConfig,
   args: {
@@ -348,10 +353,13 @@ function cubeGroupExpression(dim: GroupByDim): { select: string; groupBy: string
 /**
  * WT_CUBE 路由前的 cubeType 唯一性预检：真实库中个别 tagCode 对应 2 个 cubeType
  * （如 NBQDLLSD1 → 电流/电量离散率），口径不唯一时调用方必须回退 WT_DATA 路径。
+ *
+ * `deviceId` 以数值字面量拼进 SQL：类型系统强制 number（来源 `parseTagFilterPrefix`
+ * 的 `\d+` 捕获组，调用方负责 Number 转换），杜绝字符串拼接位注入。
  */
 export function cubeTypeDistinctSql(
   config: AskdataConfig,
-  args: { tagCode: string; deviceId?: string; granularity: number },
+  args: { tagCode: string; deviceId?: number; granularity: number },
 ): string {
   const where = [
     `tagCode = ${escapeSqlString(args.tagCode)}`,
@@ -376,7 +384,7 @@ export function aggregateCubeSql(
   config: AskdataConfig,
   args: {
     tagCode: string
-    deviceId?: string
+    deviceId?: number
     startIso: string
     endIso: string
     func: AggFunc
@@ -413,13 +421,14 @@ function mysqlTable(config: AskdataConfig, table: string): string {
   return `${config.mysqlConnection.database}.${table}`
 }
 
-/** lookup_model：查模型清单（meta_class_info，app_id 过滤）。 */
-export function lookupModelSql(config: AskdataConfig, appId: number): string {
+/** lookup_model：查模型清单（meta_class_info，app_id 过滤；LIMIT 受 maxLimit 约束）。 */
+export function lookupModelSql(config: AskdataConfig, appId: number, limit: number): string {
   return [
     'SELECT class_alias, class_name, class_path, level',
     `FROM ${mysqlTable(config, 'meta_class_info')}`,
     `WHERE app_id = ${appId}`,
     'ORDER BY class_path',
+    `LIMIT ${limit}`,
   ].join('\n')
 }
 
@@ -480,6 +489,8 @@ export function queryAlarmConfigSql(
 ): string {
   const conditions = [`deleted = 0`, `app_id = ${args.appId}`]
   if (args.cusClassPath) conditions.push(`cus_class_path = ${escapeSqlString(args.cusClassPath)}`)
+  // bole 库不在 mysqlConnection.database 配置范围内（告警配置专属库），故不走
+  // mysqlTable() 前缀约定而直接跨库引用；库名变更需同步 DEFAULT_MYSQL_TABLE_WHITELIST。
   return [
     'SELECT tag_code, tag_comment, cus_class_path, alarm_type, alarm_level, alarm_classify, is_white, status',
     'FROM bole.wt_cus_alarmdynamicconfig',

@@ -4,6 +4,7 @@ import type { QueryOutput } from '../src/clients/starrocks.ts'
 import type { SqlExecutor, ToolContext } from '../tools/types.ts'
 import { p0Tools, p1Tools, allTools } from '../tools/index.ts'
 import { buildAuditRow, type AuditRow } from '../src/audit.ts'
+import { byIncludes } from './helpers.ts'
 
 function testContext(
   respond: (sql: string) => QueryOutput,
@@ -30,13 +31,6 @@ function testContext(
   return { ctx, audits }
 }
 
-function byIncludes(map: Array<[string, QueryOutput]>): (sql: string) => QueryOutput {
-  return (sql) => {
-    const hit = map.find(([needle]) => sql.includes(needle))
-    if (!hit) throw new Error(`fake executor: 未匹配的 SQL: ${sql.slice(0, 80)}`)
-    return hit[1]
-  }
-}
 
 const tool = (name: string) => {
   const t = allTools.find((t) => t.name === name)
@@ -310,6 +304,7 @@ describe('lookup_model', () => {
     )
     const result = await tool('lookup_model').run({}, ctx)
     expect(result.success).toBe(true)
+    expect(result.apiOrSql).toContain('LIMIT 100')
     expect(result.data[0]).toEqual({
       class_alias: 'Inverter',
       class_name: '逆变器',

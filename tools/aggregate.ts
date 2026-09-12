@@ -91,9 +91,10 @@ export const aggregateTool: AskdataTool = {
       // 否则长窗口估算本身会把 cube 路由拖死（2026-09-09 真实库实证）。cubeType
       // 唯一性预检：个别 tagCode 对多个 cubeType，口径不唯一则回退 WT_DATA 保守路径。
       if (cubeEligible && filterParts && granularityNum !== undefined) {
+        const deviceId = filterParts.deviceId !== undefined ? Number(filterParts.deviceId) : undefined
         const cubeTypeSql = cubeTypeDistinctSql(ctx.config, {
           tagCode: filterParts.tagCode,
-          deviceId: filterParts.deviceId,
+          deviceId,
           granularity: granularityNum,
         })
         assertSafeToExecute(cubeTypeSql, ctx.config.security.tableWhitelist)
@@ -101,7 +102,7 @@ export const aggregateTool: AskdataTool = {
         if (cubeTypes.rows.length === 1) {
           const sql = aggregateCubeSql(ctx.config, {
             tagCode: filterParts.tagCode,
-            deviceId: filterParts.deviceId,
+            deviceId,
             startIso,
             endIso,
             func,

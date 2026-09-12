@@ -24,7 +24,7 @@ import { askdataError } from './errors.ts'
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（P0 五工具 + P1 六工具，共 11 个）。 */
+  /** 全部工具面（P0 五工具 + P1 六工具 + subagent 一工具，共 12 个）。 */
   tools: AskdataTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
   createContext(options?: {

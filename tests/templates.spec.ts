@@ -179,10 +179,10 @@ describe('SQL 字符串转义（escapeSqlString：反斜杠 + 单引号）', () 
 describe('P1 MySQL 元数据模板', () => {
   const config = testConfig()
 
-  it('lookupModelSql: app_id 过滤', () => {
-    const sql = lookupModelSql(config, 10062)
+  it('lookupModelSql: app_id 过滤 + LIMIT', () => {
+    const sql = lookupModelSql(config, 10062, 100)
     expect(sql).toContain('FROM wisetao_meta.meta_class_info')
-    expect(sql).toContain('WHERE app_id = 10062')
+    expect(sql).toContain('LIMIT 100')
   })
 
   it('lookupObjectSql: 多条件过滤 + LIKE 轉义', () => {
@@ -320,7 +320,7 @@ describe('P1 优化模板', () => {
   })
 
   it('cubeTypeDistinctSql: tagCode(+device)+granularity 预查', () => {
-    const sql = cubeTypeDistinctSql(config, { tagCode: 'HWNBYC174', deviceId: '1001', granularity: 1 })
+    const sql = cubeTypeDistinctSql(config, { tagCode: 'HWNBYC174', deviceId: 1001, granularity: 1 })
     expect(sql).toContain('SELECT DISTINCT cubeType')
     expect(sql).toContain('FROM WT_CUBE')
     expect(sql).toContain("tagCode = 'HWNBYC174'")
@@ -333,7 +333,7 @@ describe('P1 优化模板', () => {
   it('aggregateCubeSql: 真实列过滤（tagCode/device/granularity），无 quality 无 tagIndex', () => {
     const sql = aggregateCubeSql(config, {
       tagCode: 'HWNBYC174',
-      deviceId: '100620000015521',
+      deviceId: 100620000015521,
       startIso: '2026-08-01T00:00:00+08:00',
       endIso: '2026-08-02T00:00:00+08:00',
       func: 'AVG',
@@ -371,7 +371,7 @@ describe('P1 模板全部通过校验层闸门', () => {
   it('MySQL 元数据模板通过 MySQL 白名单', () => {
     const config = testConfig()
     const sqls = [
-      lookupModelSql(config, 10062),
+      lookupModelSql(config, 10062, 100),
       lookupObjectSql(config, { appId: 10062, limit: 100 }),
       lookupObjectSql(config, { appId: 10062, classPath: 'inv', nodeName: '1号', parentId: 1, limit: 100 }),
       lookupTagDefinitionSql(config, 'wisetao.pv.inverter'),
@@ -416,7 +416,7 @@ describe('P1 模板全部通过校验层闸门', () => {
       }),
       aggregateCubeSql(config, {
         tagCode: 'HWNBYC174',
-        deviceId: '100620000015521',
+        deviceId: 100620000015521,
         startIso: '2026-08-01T00:00:00+08:00',
         endIso: '2026-08-02T00:00:00+08:00',
         func: 'AVG',

@@ -7,6 +7,7 @@
 
 import { runSqlTool, type AskdataTool, type ToolContext } from './types.ts'
 import { lookupModelSql } from '../src/sql/templates.ts'
+import { validateLimit } from '../src/sql/validate.ts'
 
 /** lookup_model 工具定义。 */
 export const lookupModelTool: AskdataTool = {
@@ -16,7 +17,9 @@ export const lookupModelTool: AskdataTool = {
   layer: 'metadata',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      limit: { type: 'integer', description: '返回条数上限，默认 100' },
+    },
   },
   async run(args, ctx: ToolContext) {
     return runSqlTool(
@@ -24,10 +27,11 @@ export const lookupModelTool: AskdataTool = {
       args,
       ctx,
       async () => {
-        const sql = lookupModelSql(ctx.config, ctx.config.appId)
+        const limit = validateLimit(args.limit, ctx.config.system, ctx.config.system.defaultLookupLimit)
+        const sql = lookupModelSql(ctx.config, ctx.config.appId, limit)
         return {
           sql,
-          params: { app_id: ctx.config.appId },
+          params: { app_id: ctx.config.appId, limit },
           fields: [
             { name: 'class_alias', title: '模型别名', type: 'string' },
             { name: 'class_name', title: '模型名称', type: 'string' },
