@@ -218,16 +218,23 @@ export const askdataDeepAnalysisTool: AskdataTool = {
     const plan = classify(question)
     const steps: StepResult[] = []
 
-    // 1. 解析设备（需要时）
+    // 1. 解析设备（需要时）：采用 lookup_object 精确命中的 node_name 传给后续
+    //    resolve_tag，而非问句正则提取的原始片段（模糊片段可能残缺导致解析链断裂）。
     let device: { id?: number; node_name?: string; class__path?: string } | null = null
     if (plan.needDevice) {
       const deviceName = extractDeviceName(question)
       if (deviceName) {
-        const { step } = await runStep(lookupObjectTool, { node_name: deviceName }, ctx, steps.length)
+        const { step, result } = await runStep(lookupObjectTool, { node_name: deviceName }, ctx, steps.length)
         steps.push(step)
-        if (step.ok && step.rowCount > 0) {
-          // 注意：上面 runStep 没把 result 传出，需要再查；此处用 device 名占位
-          device = { node_name: deviceName }
+        const first = result?.success
+          ? (result.data[0] as { id?: unknown; node_name?: unknown; 'class__path'?: unknown } | undefined)
+          : undefined
+        if (first) {
+          device = {
+            id: typeof first.id === 'number' ? first.id : undefined,
+            node_name: typeof first.node_name === 'string' ? first.node_name : deviceName,
+            class__path: typeof first['class__path'] === 'string' ? first['class__path'] : undefined,
+          }
         }
       }
     }

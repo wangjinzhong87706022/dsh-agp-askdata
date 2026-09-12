@@ -114,7 +114,7 @@ tagName 四段式在 SQL 侧统一使用 StarRocks **1 基** `split(tagName,'_')
 | `security.tableWhitelist` | `['WT_TAG','WT_DATA','WT_CUBE','WT_DEVICE']` | 基础库白名单 |
 | `security.mysqlTableWhitelist` | `['wisetao_meta.meta_class_info', …]` | MySQL 白名单（跨库全限定格式） |
 | `security.scanGuard` | true | 区间查询前强制估算 |
-| `audit.{enabled,table,userId,appId,orgId}` | false / `WT_QUERY_AUDIT` | 审计开关与身份 |
+| `audit.{enabled,table,userId,appId,orgId}` | true / `WT_QUERY_AUDIT` | 审计开关与身份（哈希链默认开启：进程内行构建 + 宿主游标；落库为 P2，需旁路写账号） |
 
 ## 8. DSH 接线（P1，已实现）
 
@@ -174,7 +174,7 @@ tests/          vitest：校验层/四段式/质量位/模板金样/TSV 解析/�
 
 ### 13.1 环境与数据画像
 
-StarRocks **3.1.9**（单 FE），`root@192.168.101.54:9030`（MySQL 协议，mysql2 驱动直连，空密码）。库 `WT_DB`：`WT_TAG` 测点字典 + `WT_DATA` 时序主表，真实光伏数据——35kV 开关柜状态量（`35KV1SEG0007_2O_100620000005171`"35KVI段装置告警"等），设备号 `100620000005171`，数据止于 **2024-08-14**，密度约 **4 亿行/天**。`WT_QUERY_AUDIT` 未建（审计默认关闭）。
+StarRocks **3.1.9**（单 FE），`root@192.168.101.54:9030`（MySQL 协议，mysql2 驱动直连，空密码）。库 `WT_DB`：`WT_TAG` 测点字典 + `WT_DATA` 时序主表，真实光伏数据——35kV 开关柜状态量（`35KV1SEG0007_2O_100620000005171`"35KVI段装置告警"等），设备号 `100620000005171`，数据止于 **2024-08-14**，密度约 **4 亿行/天**。`WT_QUERY_AUDIT` 未建（审计链默认在进程内构建 + 宿主游标维护；落库为 P2，需旁路写账号）。
 
 ### 13.2 工具链 e2e（scripts/e2e-p0.ts，1 小时窗口）
 
@@ -509,6 +509,7 @@ query:
 - `lookup_tag` 仍走 SQL（WT_TAG 字典在 StarRocks，REST 无对应接口）
 - MySQL 元数据工具（lookup_model 等）仍走 MySQL SQL（REST /meta/object/* 是 P2 候选）
 - REST 通道需实现鉴权三头注入 + 错误码映射
+- **分层豁免**：当前 REST 仅覆盖 `latest_value` 主路，REST 调用必须在工具 plan 阶段发起才能接住"失败回落 SQL"，故 `tools/latest-value.ts` 运行时 import `src/clients/tsdb-rest.ts`——这是全库唯一的 tools→clients 运行时依赖，属刻意设计权衡；扩展 REST 覆盖面（time_series/aggregate）时应把通道选择下沉到执行器/路由层，恢复工具层通道无关
 
 #### 14.10.6 通用 vs 光伏特定的分离原则
 
@@ -552,7 +553,7 @@ query:
 | 查询路由 | tsdbChannel(sql/rest，取数通道优先级) · rest.baseUrl/wtAppid/wtToken/wtOpenid/**fallbackToSql** · **useAggregateTable(是否使用 WT_CUBE)** · aggregateTable(WT_CUBE) · cubeTypeMapJson · granularityMapJson | §14.10 三层路由；rest 通道 latest_value 走网关实时值，失败按 fallbackToSql 回落 SQL；`useAggregateTable=false` 或 `aggregateTable` 置空 → 只用 WT_DATA；JSON 置 `{}` 关闭对应路由 |
 | 护栏阈值 | maxScanRows(1亿) · maxTimeRangeDays(365) · badValueMask(128) · queryTimeoutMs(15000) · maxLimit(10000) · defaultLimit(1000) · defaultLookupLimit(100) · defaultAlarmLimit(100) · timeZone(+08:00) | 全部执行前机械生效 |
 | 安全 | tableWhitelist · mysqlTableWhitelist · scanGuard(true) | 白名单外表 → `SENSITIVE_TABLE`；readOnly 不开放 |
-| 审计 | enabled(false) · table · userId/appId/orgId | 进程内哈希链；落库 P2 |
+| 审计 | enabled(true) · table · userId/appId/orgId | 进程内哈希链（默认开启）；落库 P2 |
 | 安装 | installPreset(true) · presetId(askdata) | 幂等安装，绝不覆盖用户改动 |
 
 > **密码安全**：`.role('secret')` 在 DSH 页面遮蔽回显，进程内传入驱动连接参数，不落盘、不进日志、不进测试快照（AGENTS.md 红线）。P2 可按 ragflow 模式接 `@deepseek-ai/dsh-credentials` 做 credential-reference。
@@ -650,7 +651,9 @@ ORDER BY alarm_time DESC LIMIT 5
 | "有哪些模型/型号/类型" | lookup_model |
 | 默认 | lookup_tag（按关键字反查字典） |
 
-测试：`tests/deep-analysis.spec.ts` 8 个用例覆盖 5 类分支 + 失败兜底。
+设备解析链：问句正则提取的设备片段先经 `lookup_object` 模糊命中，后续 `resolve_tag` 使用**精确命中的 node_name**（而非问句原始片段），避免模糊片段残缺导致 tagName 解析链断裂。
+
+测试：`tests/deep-analysis.spec.ts` 9 个用例覆盖 5 类分支 + 设备精确名传递 + 失败兜底。
 
 ### 17.2 Skill 层（已完成，4 个聚合手册）
 

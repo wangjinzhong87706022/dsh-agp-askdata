@@ -116,7 +116,7 @@ export const Config = z.object({
   }).collapse().description('安全（只读红线恒开：security.readOnly 不开放配置，P0 恒为 true）'),
 
   audit: z.object({
-    enabled: z.boolean().default(false).description('启用审计哈希链（进程内行构建 + 游标；落库为 P2，需旁路写账号）'),
+    enabled: z.boolean().default(true).description('启用审计哈希链（默认开启：进程内行构建 + 游标；落库为 P2，需旁路写账号）'),
     table: z.string().default('WT_QUERY_AUDIT').description('审计表名'),
     userId: z.string().default('askdata').description('审计写入者身份：用户'),
     appId: z.string().default('dsh-agp-askdata').description('审计写入者身份：应用'),

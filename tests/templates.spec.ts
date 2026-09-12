@@ -209,11 +209,11 @@ describe('P1 MySQL 元数据模板', () => {
     expect(sql).toContain("c.class_path = 'wisetao.pv.inverter'")
   })
 
-  it('queryAlarmSql: 时间区间 + 级别过滤', () => {
+  it('queryAlarmSql: 时间区间 + 级别过滤（时间经 toSqlTimestamp 按会话时区换算）', () => {
     const sql = queryAlarmSql(config, {
       appId: 10062,
-      startTime: '2026-08-01 00:00:00',
-      endTime: '2026-08-02 00:00:00',
+      startTime: '2026-08-01T00:00:00+08:00',
+      endTime: '2026-08-02T00:00:00+08:00',
       alarmLevel: 'critical',
       limit: 100,
     })
@@ -377,8 +377,8 @@ describe('P1 模板全部通过校验层闸门', () => {
       lookupTagDefinitionSql(config, 'wisetao.pv.inverter'),
       queryAlarmSql(config, {
         appId: 10062,
-        startTime: '2026-08-01 00:00:00',
-        endTime: '2026-08-02 00:00:00',
+        startTime: '2026-08-01T00:00:00+08:00',
+        endTime: '2026-08-02T00:00:00+08:00',
         limit: 100,
       }),
       queryAlarmConfigSql(config, { appId: 10062 }),

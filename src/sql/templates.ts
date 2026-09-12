@@ -460,8 +460,8 @@ export function queryAlarmSql(
   const conditions = [
     `deleted = 0`,
     `app_id = ${args.appId}`,
-    `alarm_time >= ${escapeSqlString(args.startTime)}`,
-    `alarm_time < ${escapeSqlString(args.endTime)}`,
+    `alarm_time >= ${toSqlTimestamp(args.startTime, config.system.timeZone)}`,
+    `alarm_time < ${toSqlTimestamp(args.endTime, config.system.timeZone)}`,
   ]
   if (args.alarmLevel) conditions.push(`alarm_level = ${escapeSqlString(args.alarmLevel)}`)
   return [

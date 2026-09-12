@@ -199,7 +199,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     scanGuard: true,
   },
   audit: {
-    enabled: false,
+    enabled: true,
     table: 'WT_QUERY_AUDIT',
     userId: 'askdata',
     appId: 'dsh-agp-askdata',

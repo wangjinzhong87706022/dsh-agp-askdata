@@ -28,6 +28,11 @@ describe('配置页默认值可装配', () => {
     expect(cfg.connection.user).toBe('askdata_ro')
     expect(() => Config(null)).toThrow()
   })
+
+  it('审计哈希链默认开启（进程内行构建；落库为 P2）', () => {
+    const service = createAskdataService(toRuntimeConfig(defaultConfig()))
+    expect(service.config.audit.enabled).toBe(true)
+  })
 })
 
 describe('parseJsonMapField（页面 textarea ↔ 运行时 Record）', () => {

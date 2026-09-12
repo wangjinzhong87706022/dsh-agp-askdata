@@ -100,6 +100,29 @@ describe('askdata_deep_analysis（subagent-style 工具）', () => {
     expect(traceRow.tool).toBe('lookup_model')
   })
 
+  it('设备解析采用 lookup_object 精确命中值传给 resolve_tag（而非问句片段）', async () => {
+    const sqls: string[] = []
+    const exec = {
+      execute: async (sql: string): Promise<QueryOutput> => {
+        sqls.push(sql)
+        if (sql.includes('wt_elm_equipment') && sql.includes('LIKE')) {
+          return { columns: ['id', 'node_name', 'class__path'], rows: [{ id: '174', node_name: '1号箱变1号逆变器', 'class__path': 'wt_elm_equipment/wt_iot_huaweisun2000' }] }
+        }
+        if (sql.includes('wt_elm_equipment')) {
+          return { columns: ['id', 'class__path'], rows: [{ id: '174', 'class__path': 'wt_elm_equipment/wt_iot_huaweisun2000' }] }
+        }
+        return { columns: [], rows: [] }
+      },
+    }
+    await askdataDeepAnalysisTool.run(
+      { question: '号箱变功率趋势' },
+      { ...ctx(), executor: exec, mysqlExecutor: exec },
+    )
+    // resolve_tag step1（等值查询）必须用 lookup_object 返回的精确 node_name
+    const step1 = sqls.find((s) => s.includes('wt_elm_equipment') && !s.includes('LIKE'))
+    expect(step1).toContain("node_name = '1号箱变1号逆变器'")
+  })
+
   it('空 question → INVALID_PARAM', async () => {
     const r = await askdataDeepAnalysisTool.run({}, ctx())
     expect(r.success).toBe(false)
