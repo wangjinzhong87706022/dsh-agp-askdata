@@ -24,7 +24,6 @@
  * @module
  */
 
-import { askdataError } from '../src/errors.ts'
 import type { AskdataTool, ToolContext } from './types.ts'
 import { ok, fail, type ResultField, type ToolResult } from '../src/result.ts'
 import { lookupObjectTool } from './lookup-object.ts'
@@ -36,6 +35,7 @@ import { queryAlarmTool } from './query-alarm.ts'
 import { queryAlarmConfigTool } from './query-alarm-config.ts'
 import { lookupModelTool } from './lookup-model.ts'
 import { lookupTagTool } from './lookup-tag.ts'
+
 /** 单步执行结果（流水线 trace 元素）。 */
 interface StepResult {
   index: number

@@ -11,6 +11,7 @@
   "exports": {
     ".": "./lib/dsh/plugin.js",
     "./tools": "./lib/dsh/tools.js",
+    "./skills": "./lib/dsh/skills.js",
     "./service": "./lib/index.js"
   },
   "scripts": {
