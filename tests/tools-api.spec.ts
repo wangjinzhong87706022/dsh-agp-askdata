@@ -409,6 +409,16 @@ describe('入参校验与错误映射', () => {
     expect((await tool('tag_real').run({ tag_names: [' '] }, ctx)).errorCode).toBe('INVALID_PARAM')
     expect(calls).toHaveLength(0)
   })
+  it('tag_names 数量/单值长度超限 → INVALID_PARAM 且不触达执行器', async () => {
+    const { ctx, calls } = testContext(() => queryResult())
+    const tooMany = Array.from({ length: 1001 }, (_, i) => `T${i}`)
+    const r1 = await tool('tag_real').run({ tag_names: tooMany }, ctx)
+    expect(r1.errorCode).toBe('INVALID_PARAM')
+    expect(r1.errorMessage).toContain('1000')
+    const r2 = await tool('tag_real').run({ tag_names: ['x'.repeat(257)] }, ctx)
+    expect(r2.errorCode).toBe('INVALID_PARAM')
+    expect(calls).toHaveLength(0)
+  })
   it('tag_wide 的 interval 必须为正整数', async () => {
     const { ctx } = testContext(() => queryResult())
     expect((await tool('tag_wide').run({ tag_names: ['A'], start_time: 't', interval: 0 }, ctx)).errorCode).toBe('INVALID_PARAM')
@@ -490,5 +500,62 @@ describe('审计', () => {
     await tool('tag_real').run({ tag_names: ['A'] }, ctx)
     expect(audits).toHaveLength(1)
     expect(audits[0]!.errorCode).toBe('API_UNREACHABLE')
+  })
+})
+
+describe('取消信号（宿主中断）', () => {
+  it('runApiTool 把 ctx.signal 透传给执行口', async () => {
+    const controller = new AbortController()
+    const seen: Array<AbortSignal | undefined> = []
+    const config: AskdataConfig = resolveConfig({
+      connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
+    })
+    const ctx: ApiToolContext = {
+      config,
+      apiClient: {
+        async execute(_method, _path, _params, options) {
+          seen.push(options?.signal)
+          return { field: [], data: [] }
+        },
+      },
+      signal: controller.signal,
+    }
+    await tool('tag_real').run({ tag_names: ['A'] }, ctx)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe(controller.signal)
+  })
+
+  it('ApiClient：宿主取消映射为 BACKEND_DOWN（而非 API_TIMEOUT），且中止在途 fetch', async () => {
+    const controller = new AbortController()
+    let fetchSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', (_url: string | URL, init?: { signal?: AbortSignal }) => {
+      fetchSignal = init?.signal
+      return new Promise((_resolve, reject) => {
+        const fail = (): void => {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+        }
+        if (init?.signal?.aborted) fail()
+        else init?.signal?.addEventListener('abort', fail, { once: true })
+      })
+    })
+    try {
+      const client = new ApiClient({
+        baseUrl: 'https://api.example.com',
+        apiPrefix: '/s1M6_uE9',
+        token: 'tok',
+        openid: 'oid',
+        projectId: 'pid',
+        timeoutMs: 5000,
+        maxPageSize: 100,
+      })
+      const pending = client.execute('GET', '/wz/x', {}, { signal: controller.signal })
+      controller.abort()
+      await expect(pending).rejects.toMatchObject({ code: 'BACKEND_DOWN' })
+      expect(fetchSignal?.aborted).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

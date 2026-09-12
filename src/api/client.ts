@@ -57,16 +57,16 @@ export class ApiClient {
   }
 
   /** GET 请求。 */
-  async get<T>(path: string, params?: Record<string, string>): Promise<T> {
+  async get<T>(path: string, params?: Record<string, string>, options?: { signal?: AbortSignal }): Promise<T> {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
     const url = `${this.config.baseUrl}${this.config.apiPrefix}${path}${qs}`
-    return this.request<T>('GET', url)
+    return this.request<T>('GET', url, undefined, options)
   }
 
   /** POST 请求。 */
-  async post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  async post<T>(path: string, body: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<T> {
     const url = `${this.config.baseUrl}${this.config.apiPrefix}${path}`
-    return this.request<T>('POST', url, JSON.stringify(body))
+    return this.request<T>('POST', url, JSON.stringify(body), options)
   }
 
   /** 获取认证头。WT-ROUTER 为网关鉴权中间件的实测必需头（缺它报 00011「登录过期」，2026-09-10 E2E 实证）。 */
@@ -83,34 +83,51 @@ export class ApiClient {
   /**
    * 通用执行方法（供 runApiTool 调用）：method 显式声明，不再按路径字符串嗅探。
    * GET 走查询串（数组值自动逗号连接，对齐 tagNames 约定）；POST 走 JSON body。
+   * `options.signal` 为宿主取消信号（模型中断），与请求超时信号合并后传给 fetch。
    */
-  async execute<T>(method: 'GET' | 'POST', path: string, params: Record<string, unknown>): Promise<T> {
+  async execute<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    params: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<T> {
     if (method === 'POST') {
-      return this.post<T>(path, params)
+      return this.post<T>(path, params, options)
     }
     const query: Record<string, string> = {}
     for (const [key, value] of Object.entries(params)) {
       query[key] = Array.isArray(value) ? value.join(',') : String(value)
     }
-    return this.get<T>(path, query)
+    return this.get<T>(path, query, options)
   }
 
   /** 执行 HTTP 请求并处理响应（5xx 带退避重试）。 */
-  private async request<T>(method: string, url: string, body?: string): Promise<T> {
+  private async request<T>(method: string, url: string, body?: string, options?: { signal?: AbortSignal }): Promise<T> {
     const headers: Record<string, string> = this.authHeaders()
     if (body) headers['Content-Type'] = 'application/json'
 
+    // 宿主取消信号与请求超时信号合并：任一触发即中止在途 fetch。
+    // 每次重试构造独立的 timeout signal，避免前一次超时计时器污染后一次尝试。
+    const timeoutSignal = (): AbortSignal => AbortSignal.timeout(this.config.timeoutMs)
+    const combinedSignal = (): AbortSignal =>
+      options?.signal ? AbortSignal.any([options.signal, timeoutSignal()]) : timeoutSignal()
+
     const maxRetries = 2
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (options?.signal?.aborted) throw askdataError('BACKEND_DOWN', 'API 请求已被取消')
       let resp: Response
       try {
         resp = await fetch(url, {
           method,
           headers,
           body,
-          signal: AbortSignal.timeout(this.config.timeoutMs),
+          signal: combinedSignal(),
         })
       } catch (e) {
+        // 宿主取消优先于超时判定：两者都表现为 AbortError。
+        if (options?.signal?.aborted) {
+          throw askdataError('BACKEND_DOWN', `API 请求已被取消: ${path(url)}`)
+        }
         const msg = e instanceof Error ? e.message : String(e)
         if (msg.includes('timeout') || msg.includes('abort')) {
           throw askdataError('API_TIMEOUT', `API 请求超时 (${this.config.timeoutMs}ms): ${path(url)}`)

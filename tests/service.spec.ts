@@ -1,6 +1,6 @@
 /**
  * 服务装配级测试：白名单闸门在执行器咽喉点收口（调用点遗漏也无法绕过）、
- * 工具面完整性（SQL 12 工具 + API 8 工具）、MySQL 业务库未配置的运行期守卫。
+ * 工具面完整性（SQL 12 工具 + API 12 工具）、MySQL 业务库未配置的运行期守卫。
  * @module
  */
 
@@ -104,6 +104,22 @@ describe('服务装配', () => {
         system: { timeZone: 'Asia/Shanghai' },
       }),
     ).toThrow(/timeZone/)
+  })
+
+  it('mysqlConnection.database 与白名单前缀不一致 → 创建期失败（不拖到运行期 SENSITIVE_TABLE）', () => {
+    expect(() =>
+      createAskdataService({
+        connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
+        mysqlConnection: { host: 'db', port: 3306, user: 'u', password: 'p', database: 'other_db' },
+      }),
+    ).toThrow(/mysqlTableWhitelist/)
+    // 与默认白名单前缀一致时通过
+    expect(() =>
+      createAskdataService({
+        connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
+        mysqlConnection: { host: 'db', port: 3306, user: 'u', password: 'p', database: 'wisetao_meta' },
+      }),
+    ).not.toThrow()
   })
 
   it('AskdataError 从闸门抛出（不带裸 Error）', async () => {

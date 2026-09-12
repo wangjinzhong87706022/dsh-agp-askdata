@@ -26,9 +26,14 @@ import {
   type AskdataService,
 } from '../index.ts'
 import {
+  DEFAULT_API_CONFIG,
+  DEFAULT_AUDIT_CONFIG,
   DEFAULT_CUBE_TYPE_MAP,
   DEFAULT_GRANULARITY_MAP,
-  DEFAULT_MYSQL_TABLE_WHITELIST,
+  DEFAULT_MYSQL_CONNECTION,
+  DEFAULT_SECURITY_CONFIG,
+  DEFAULT_SYSTEM_LIMITS,
+  DEFAULT_TABLES,
 } from '../config.ts'
 
 /** Cordis 插件名（诊断用）。 */
@@ -58,20 +63,20 @@ export const Config = z.object({
   }).collapse().description('StarRocks TSDB 连接（P0 必配）'),
 
   mysqlConnection: z.object({
-    host: z.string().default('').description('MySQL 业务库地址；留空则 P0 面可用、P1 元数据/告警工具不可用'),
-    port: z.number().default(3306).min(1).max(65535).description('MySQL 端口'),
-    user: z.string().default('').description('MySQL 账号（生产必须只读账号）'),
-    password: z.string().role('secret').default('').description('MySQL 密码（进程内使用，不落盘不进日志）'),
-    database: z.string().default('wisetao_meta').description('元数据库（告警配置 bole 库走跨库引用）'),
+    host: z.string().default(DEFAULT_MYSQL_CONNECTION.host).description('MySQL 业务库地址；留空则 P0 面可用、P1 元数据/告警工具不可用'),
+    port: z.number().default(DEFAULT_MYSQL_CONNECTION.port).min(1).max(65535).description('MySQL 端口'),
+    user: z.string().default(DEFAULT_MYSQL_CONNECTION.user).description('MySQL 账号（生产必须只读账号）'),
+    password: z.string().role('secret').default(DEFAULT_MYSQL_CONNECTION.password).description('MySQL 密码（进程内使用，不落盘不进日志）'),
+    database: z.string().default(DEFAULT_MYSQL_CONNECTION.database).description('元数据库（如 wisetao_meta；填 host 时必填，且需与 mysqlTableWhitelist 前缀一致）'),
   }).collapse().description('MySQL 业务库连接（P1 元数据/告警工具需要）'),
 
   appId: z.number().default(10062).description('光伏应用 ID（lookup_model / lookup_object / 告警查询的过滤范围）'),
 
   tables: z.object({
-    tag: z.string().default('WT_TAG').description('测点字典表'),
-    data: z.string().default('WT_DATA').description('时序主表'),
-    cube: z.string().default('WT_CUBE').description('预聚合表（光伏特定；aggregate 自动路由的目标）'),
-    device: z.string().default('WT_DEVICE').description('设备维度表'),
+    tag: z.string().default(DEFAULT_TABLES.tag).description('测点字典表'),
+    data: z.string().default(DEFAULT_TABLES.data).description('时序主表'),
+    cube: z.string().default(DEFAULT_TABLES.cube).description('预聚合表（光伏特定；aggregate 自动路由的目标）'),
+    device: z.string().default(DEFAULT_TABLES.device).description('设备维度表'),
   }).collapse().description('表名映射（不同部署可能改名）'),
 
   query: z.object({
@@ -92,42 +97,42 @@ export const Config = z.object({
   }).collapse().description('查询路由（§14.10 三层：通道 → 聚合表 → 粒度；LLM 不感知路由细节）'),
 
   api: z.object({
-    baseUrl: z.string().default('https://www.openagp.top:9080').description('AGP REST API 基址'),
-    apiPrefix: z.string().default('/s1M6_uE9').description('API 前缀（如 /s1M6_uE9）'),
-    token: z.string().role('secret').default('').description('用户鉴权令牌 WT-TOKEN（进程内使用，不落盘不进日志）'),
-    openid: z.string().default('').description('用户 ID WT-OPENID'),
-    projectId: z.string().default('10462').description('项目 ID WT-PROJECTID'),
-    timeoutMs: z.number().default(15000).min(1000).description('单次请求超时（毫秒）'),
-    maxPageSize: z.number().default(1000).min(1).max(10000).description('单页最大返回行数（pageSize 上限）'),
+    baseUrl: z.string().default(DEFAULT_API_CONFIG.baseUrl).description('AGP REST API 基址'),
+    apiPrefix: z.string().default(DEFAULT_API_CONFIG.apiPrefix).description('API 前缀（如 /s1M6_uE9）'),
+    token: z.string().role('secret').default(DEFAULT_API_CONFIG.token).description('用户鉴权令牌 WT-TOKEN（进程内使用，不落盘不进日志）'),
+    openid: z.string().default(DEFAULT_API_CONFIG.openid).description('用户 ID WT-OPENID'),
+    projectId: z.string().default(DEFAULT_API_CONFIG.projectId).description('项目 ID WT-PROJECTID；留空则运行期需显式配置'),
+    timeoutMs: z.number().default(DEFAULT_API_CONFIG.timeoutMs).min(1000).description('单次请求超时（毫秒）'),
+    maxPageSize: z.number().default(DEFAULT_API_CONFIG.maxPageSize).min(1).max(10000).description('单页最大返回行数（pageSize 上限）'),
   }).collapse().description('AGP REST API 客户端配置（新 API 网关：/s1M6_uE9/wz/）'),
 
   system: z.object({
-    maxScanRows: z.number().default(100_000_000).min(1).description('扫描护栏阈值（行）；区间估算超过即拒绝并提示 LLM 缩窗'),
-    maxTimeRangeDays: z.number().default(365).min(1).description('单次查询最大时间跨度（天）'),
-    badValueMask: z.number().default(128).min(0).max(65535).description('质量位坏值掩码（AGP 默认 128 = 剔除 BAD）'),
-    queryTimeoutMs: z.number().default(15_000).min(1000).description('单条 SQL 超时（毫秒；超时由适配器强制执行 conn.destroy）'),
-    maxLimit: z.number().default(10_000).min(1).description('单次返回行数硬上限'),
-    defaultLimit: z.number().default(1000).min(1).description('时序/聚合工具默认返回行数'),
-    defaultLookupLimit: z.number().default(100).min(1).description('字典/设备反查工具默认返回行数'),
-    defaultAlarmLimit: z.number().default(100).min(1).description('告警工具默认返回行数（控制进入模型上下文的量）'),
-    timeZone: z.string().default('+08:00').pattern(/^[+-]\d{2}:\d{2}$/)
+    maxScanRows: z.number().default(DEFAULT_SYSTEM_LIMITS.maxScanRows).min(1).description('扫描护栏阈值（行）；区间估算超过即拒绝并提示 LLM 缩窗'),
+    maxTimeRangeDays: z.number().default(DEFAULT_SYSTEM_LIMITS.maxTimeRangeDays).min(1).description('单次查询最大时间跨度（天）'),
+    badValueMask: z.number().default(DEFAULT_SYSTEM_LIMITS.badValueMask).min(0).max(65535).description('质量位坏值掩码（AGP 默认 128 = 剔除 BAD）'),
+    queryTimeoutMs: z.number().default(DEFAULT_SYSTEM_LIMITS.queryTimeoutMs).min(1000).description('单条 SQL 超时（毫秒；超时由适配器强制执行 conn.destroy）'),
+    maxLimit: z.number().default(DEFAULT_SYSTEM_LIMITS.maxLimit).min(1).description('单次返回行数硬上限'),
+    defaultLimit: z.number().default(DEFAULT_SYSTEM_LIMITS.defaultLimit).min(1).description('时序/聚合工具默认返回行数'),
+    defaultLookupLimit: z.number().default(DEFAULT_SYSTEM_LIMITS.defaultLookupLimit).min(1).description('字典/设备反查工具默认返回行数'),
+    defaultAlarmLimit: z.number().default(DEFAULT_SYSTEM_LIMITS.defaultAlarmLimit).min(1).description('告警工具默认返回行数（控制进入模型上下文的量）'),
+    timeZone: z.string().default(DEFAULT_SYSTEM_LIMITS.timeZone).pattern(/^[+-]\d{2}:\d{2}$/)
       .description('会话时区，仅接受 ±HH:MM（如 +08:00）；时间字面量统一按此偏移换算'),
   }).collapse().description('护栏阈值（全部在执行前机械生效，与 LLM 无关）'),
 
   security: z.object({
-    tableWhitelist: z.array(z.string()).default(['WT_TAG', 'WT_DATA', 'WT_CUBE', 'WT_DEVICE'])
+    tableWhitelist: z.array(z.string()).default(DEFAULT_SECURITY_CONFIG.tableWhitelist)
       .description('StarRocks 基础库白名单：模板 SQL 引用的表必须全部命中，否则 SENSITIVE_TABLE'),
-    mysqlTableWhitelist: z.array(z.string()).default(DEFAULT_MYSQL_TABLE_WHITELIST)
-      .description('MySQL 白名单（跨库全限定格式 db.table）'),
-    scanGuard: z.boolean().default(true).description('区间查询前强制扫描估算（aggregate 命中 WT_CUBE 路由时自动跳过）'),
+    mysqlTableWhitelist: z.array(z.string()).default(DEFAULT_SECURITY_CONFIG.mysqlTableWhitelist)
+      .description('MySQL 白名单（跨库全限定格式 db.table；前缀须与 mysqlConnection.database 一致）'),
+    scanGuard: z.boolean().default(DEFAULT_SECURITY_CONFIG.scanGuard).description('区间查询前强制扫描估算（aggregate 命中 WT_CUBE 路由时自动跳过）'),
   }).collapse().description('安全（只读红线恒开：security.readOnly 不开放配置，P0 恒为 true）'),
 
   audit: z.object({
-    enabled: z.boolean().default(false).description('启用审计哈希链（进程内行构建 + 游标；落库为 P2，需旁路写账号）'),
-    table: z.string().default('WT_QUERY_AUDIT').description('审计表名'),
-    userId: z.string().default('askdata').description('审计写入者身份：用户'),
-    appId: z.string().default('dsh-agp-askdata').description('审计写入者身份：应用'),
-    orgId: z.string().default('').description('审计写入者身份：组织'),
+    enabled: z.boolean().default(DEFAULT_AUDIT_CONFIG.enabled).description('启用审计哈希链（进程内行构建 + 游标；落库为 P2，需旁路写账号）'),
+    table: z.string().default(DEFAULT_AUDIT_CONFIG.table).description('审计表名'),
+    userId: z.string().default(DEFAULT_AUDIT_CONFIG.userId).description('审计写入者身份：用户'),
+    appId: z.string().default(DEFAULT_AUDIT_CONFIG.appId).description('审计写入者身份：应用'),
+    orgId: z.string().default(DEFAULT_AUDIT_CONFIG.orgId).description('审计写入者身份：组织'),
   }).collapse().description('审计'),
 
   installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),

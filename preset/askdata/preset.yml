@@ -1,2 +1,2 @@
 name: AGP问数
-description: 连接 AGP TSDB（StarRocks），用自然语言完成时序数据查询、聚合分析与业务指标问数。
+description: 通过 AGP REST API 用自然语言完成模型数据查询、分段聚合统计与测点时序分析。

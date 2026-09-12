@@ -72,7 +72,9 @@ AGP TSDB / Database 智能问数的 DSH 插件。本文是实现的共同基线�
 | 基础库白名单 | `extractTables` 提取 FROM/JOIN 表名，逐一命中 `security.tableWhitelist`，否则 `SENSITIVE_TABLE` | 同上 |
 | 扫描护栏 | 区间查询前强制 `estimate_count`（`security.scanGuard`，默认开），超限 → `EXCEED_LIMIT`；`aggregate` 命中 WT_CUBE 路由时跳过（实际扫描的是预聚合表，非 WT_DATA 大区间） | `tools/time-series.ts`、`tools/aggregate.ts` |
 | 质量过滤 | 所有时序 SQL 强制 `bitand(quality, 128) != 128`（掩码可配）；`decodeQuality` 供答案解释 | `src/sql/quality.ts` |
-| 审计 | 每次调用（成功/失败）构建 `WT_QUERY_AUDIT` 行，`result_hash=SHA256(sql‖result)`，`prev_hash` 链式；**P0/P1 链仅在进程内维护**（行构建 + 宿主闭包游标），落库为 P2（需旁路写账号）；审计失败不阻断查询。`insertAuditSql` 是规格要求的 INSERT 模板，仅供旁路写通道使用，绝不进入取数面 | `src/audit.ts`、`tools/types.ts` |
+| 审计 | 每次调用（成功/失败）构建 `WT_QUERY_AUDIT` 行，`result_hash=SHA256(prev_hash‖sql‖result)`，`prev_hash` 链式；`verifyAuditChain` 提供链接 + 格式（可选重算）校验。**P0/P1 链仅在进程内维护**（行构建 + 宿主闭包游标），落库为 P2（需旁路写账号）；审计失败不阻断查询。`insertAuditSql` 是规格要求的 INSERT 模板，仅供旁路写通道使用，绝不进入取数面 | `src/audit.ts`、`tools/types.ts` |
+
+> **规格偏差（待回灌上游 `docs/spec`）**：上游规格公式为 `SHA256(sql‖result_json)`，不含 `prev_hash`——写入方解耦后，"链式防删"不成立（删行只需改写后继 `prev_hash`，`result_hash` 无需重算）。本实现把 `prev_hash` 纳入哈希。**注意**：完整防篡改还要求验证方拿得到原始 `result_json`（当前 `WT_QUERY_AUDIT` DDL 未持久化 result_json，仅存 `result_hash`）；落库（P2）时需一并确定 result_json 的持久化/旁路来源，否则 `verifyAuditChain` 只能做链接与格式校验。
 
 输入校验（《规范》§1.1）：ISO8601 时间（start<end、≤365 天）、过滤串 ≤1024 且禁 `;`/`--`/`/*`、tagName 数组 1-1000 去重、limit 1-10000。
 
@@ -747,7 +749,7 @@ API 工具面 8 → **10**；persona 同步（preset/askdata）。
 
 ### 18.6 API-only 收口 + 工具层端到端测试（2026-09-11 10:30）
 
-**决策：本版本智能问数只走 API。** `dsh-agp-askdata/tools` 行改为仅注册 10 个 API 工具，SQL 工具面（12 个）保留在服务编程接口（`service.tools`）但不再注册进 DSH——取数统一收口 API 网关。persona 同步为 API-only。
+**决策：本版本智能问数只走 API。** `dsh-agp-askdata/tools` 行改为仅注册 12 个 API 工具，SQL 工具面（12 个）保留在服务编程接口（`service.tools`）但不再注册进 DSH——取数统一收口 API 网关。persona 同步为 API-only。
 
 **工具层端到端**（`scripts/e2e-api-tools.ts`，真实 API、工具全路径、含审计链）：以模拟量.xlsx 的 20 个测点（current/voltage/temp/power/electric × pump0001-0004）为用例：
 

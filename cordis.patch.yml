@@ -1,11 +1,13 @@
 # The dsh-agp-askdata bundle patch: activates the plugin as a profile layer.
 #
 # feature/schema-validation 分支：通过 AGP REST API 取数（/s1M6_uE9/wz/），
-# 不直连 StarRocks/MySQL。8 个 API 工具（list_models/model_attributes/
-# query_model/tag_real/tag_history/tag_wide/tag_aggregate/resolve_tag）。
+# 不直连 StarRocks/MySQL。12 个 API 工具（list_models/model_attributes/
+# query_model/query_model_segment/query_relation_segment/model_tags/object_tags/
+# resolve_tag/tag_real/tag_history/tag_wide/tag_aggregate）。
 #
-# 凭据通过环境变量注入（AGP_API_TOKEN / AGP_API_OPENID），不落盘不进日志。
-# connection/mysqlConnection 保留但本分支不使用（tsdbChannel 走 API 通道）。
+# 凭据一律经环境变量注入（AGP_API_TOKEN / AGP_API_OPENID / MYSQL_PASSWORD /
+# STARROCKS_PASSWORD），不落盘不进日志。connection/mysqlConnection 在本分支不
+# 参与取数（取数走 API 通道），仅作为编程接口（service.tools）的占位配置保留。
 - insert:
     - id: askdata
       name: 'dsh-agp-askdata'
@@ -14,14 +16,14 @@
           host: '192.168.101.54'
           port: 9030
           user: 'root'
-          password: ''
+          password: '${STARROCKS_PASSWORD}'
           database: 'WT_DB'
           driver: 'mysql2'
         mysqlConnection:
           host: '192.168.101.54'
           port: 3306
           user: 'root'
-          password: 'Aa123456.'
+          password: '${MYSQL_PASSWORD}'
           database: 'wisetao_meta'
         api:
           baseUrl: 'https://www.openagp.top:9080'

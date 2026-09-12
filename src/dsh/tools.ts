@@ -1,5 +1,5 @@
 /**
- * askdata 工具行（`dsh-agp-askdata/tools`）：把服务的 **API 工具面**（10 个工具，
+ * askdata 工具行（`dsh-agp-askdata/tools`）：把服务的 **API 工具面**（12 个工具，
  * AGP REST API /s1M6_uE9/wz/）注册进 DSH 工具注册表。
  *
  * **本版本智能问数只走 API**：SQL 工具面（StarRocks/MySQL 直连）保留在
@@ -32,7 +32,7 @@ export const inject = ['tools', 'askdata']
 export const Config = z.object({})
 
 /**
- * 注册全部 API 工具（10 个）。每个 AskdataApiTool 适配为 DSH 工具定义；
+ * 注册全部 API 工具（12 个）。每个 AskdataApiTool 适配为 DSH 工具定义；
  * 取消信号与审计链游标在每次调用时注入工具上下文。
  *
  * `ctx.tools` 由 DSH 宿主的 tools 服务合并进 Context（@deepseek-ai/dsh-tools

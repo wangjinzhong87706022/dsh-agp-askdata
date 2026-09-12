@@ -56,7 +56,7 @@
 
 # ── askdata tools ───────────────────────────────────────────────────────────
 
-# 8 API 工具经本行注册；行只消费宿主服务（tools + askdata），满足 preset 守卫。
+# 12 API 工具经本行注册；行只消费宿主服务（tools + askdata），满足 preset 守卫。
 # API 凭据与配置在宿主行 `dsh-agp-askdata` 的 Config（cordis.patch.yml）。
 - id: askdata-tools
   name: 'dsh-agp-askdata/tools'

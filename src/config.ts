@@ -177,18 +177,66 @@ export const DEFAULT_MYSQL_TABLE_WHITELIST: string[] = [
   'bole.wt_cus_alarmdynamicconfig',
 ]
 
+// ============ 默认值常量（唯一来源：运行时 resolveConfig 与 DSH 配置页 schema 共用） ============
+// 禁止在别处内嵌第二套默认值：页面 schema 与运行时解析必须引用这里的同一份常量。
+
+/** 默认 MySQL 连接（host/database 留空 = 未配置；不烙印任何内网拓扑）。 */
+export const DEFAULT_MYSQL_CONNECTION: MysqlConnection = {
+  host: '',
+  port: 3306,
+  user: '',
+  password: '',
+  database: '',
+}
+
+/** 默认表名映射（不同部署可能改名）。 */
+export const DEFAULT_TABLES: TableNames = { tag: 'WT_TAG', data: 'WT_DATA', cube: 'WT_CUBE', device: 'WT_DEVICE' }
+
+/** 默认护栏阈值。 */
+export const DEFAULT_SYSTEM_LIMITS: SystemLimits = {
+  maxScanRows: 100_000_000,
+  maxTimeRangeDays: 365,
+  badValueMask: 128,
+  queryTimeoutMs: 15_000,
+  maxLimit: 10_000,
+  defaultLimit: 1000,
+  defaultLookupLimit: 100,
+  defaultAlarmLimit: 100,
+  timeZone: '+08:00',
+}
+
+/** 默认安全配置（readOnly 恒 true，不开放配置）。 */
+export const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
+  tableWhitelist: ['WT_TAG', 'WT_DATA', 'WT_CUBE', 'WT_DEVICE'],
+  mysqlTableWhitelist: DEFAULT_MYSQL_TABLE_WHITELIST,
+  readOnly: true,
+  scanGuard: true,
+}
+
+/** 默认审计配置（进程内链；落库 P2）。 */
+export const DEFAULT_AUDIT_CONFIG: AuditConfig = {
+  enabled: false,
+  table: 'WT_QUERY_AUDIT',
+  userId: 'askdata',
+  appId: 'dsh-agp-askdata',
+  orgId: '',
+}
+
+/** 默认 AGP REST API 客户端配置（token/openid/projectId 留空，运行期显式注入）。 */
+export const DEFAULT_API_CONFIG: ApiConfig = {
+  baseUrl: 'https://www.openagp.top:9080',
+  apiPrefix: '/s1M6_uE9',
+  token: '',
+  openid: '',
+  projectId: '',
+  timeoutMs: 15_000,
+  maxPageSize: 1000,
+}
+
 const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
-  // MySQL 业务库默认留空：P0 纯 TSDB 部署无需配置；P1 元数据/告警工具在调用期
-  // 以明确错误提示缺配置（不指向任何环境，避免内网拓扑烙进默认值）。
-  mysqlConnection: {
-    host: '',
-    port: 3306,
-    user: '',
-    password: '',
-    database: '',
-  },
+  mysqlConnection: DEFAULT_MYSQL_CONNECTION,
   appId: 10062,
-  tables: { tag: 'WT_TAG', data: 'WT_DATA', cube: 'WT_CUBE', device: 'WT_DEVICE' },
+  tables: DEFAULT_TABLES,
   query: {
     tsdbChannel: 'sql',
     rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '' },
@@ -196,40 +244,10 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
     granularityMap: DEFAULT_GRANULARITY_MAP,
   },
-  // AGP REST API 客户端默认配置（新 API 网关）
-  api: {
-    baseUrl: 'https://www.openagp.top:9080',
-    apiPrefix: '/s1M6_uE9',
-    token: '',
-    openid: '',
-    projectId: '',
-    timeoutMs: 15_000,
-    maxPageSize: 1000,
-  },
-  system: {
-    maxScanRows: 100_000_000,
-    maxTimeRangeDays: 365,
-    badValueMask: 128,
-    queryTimeoutMs: 15_000,
-    maxLimit: 10_000,
-    defaultLimit: 1000,
-    defaultLookupLimit: 100,
-    defaultAlarmLimit: 100,
-    timeZone: '+08:00',
-  },
-  security: {
-    tableWhitelist: ['WT_TAG', 'WT_DATA', 'WT_CUBE', 'WT_DEVICE'],
-    mysqlTableWhitelist: DEFAULT_MYSQL_TABLE_WHITELIST,
-    readOnly: true,
-    scanGuard: true,
-  },
-  audit: {
-    enabled: false,
-    table: 'WT_QUERY_AUDIT',
-    userId: 'askdata',
-    appId: 'dsh-agp-askdata',
-    orgId: '',
-  },
+  api: DEFAULT_API_CONFIG,
+  system: DEFAULT_SYSTEM_LIMITS,
+  security: DEFAULT_SECURITY_CONFIG,
+  audit: DEFAULT_AUDIT_CONFIG,
 }
 
 /**
@@ -280,6 +298,18 @@ export function resolveConfig(input: {
   }
   if (mysqlConnection.host !== '' && !mysqlConnection.database) {
     throw new Error('配置错误：配置了 mysqlConnection.host 时 mysqlConnection.database 必填')
+  }
+  // MySQL 表名由模板拼成 "<database>.<table>"（templates.mysqlTable），白名单默认是
+  // wisetao_meta.*；若 database 被改而白名单未同步，全部 P1 工具会在运行期
+  // SENSITIVE_TABLE。此处前置为加载期错误（misconfiguration fails loud）。
+  if (mysqlConnection.host !== '' && mysqlConnection.database !== '') {
+    const prefix = `${mysqlConnection.database}.`.toLowerCase()
+    if (!security.mysqlTableWhitelist.some((t) => t.toLowerCase().startsWith(prefix))) {
+      throw new Error(
+        `配置错误：mysqlConnection.database="${mysqlConnection.database}" 与 security.mysqlTableWhitelist 不一致`
+        + `——模板会生成 "${mysqlConnection.database}.<table>" 形式的表名，白名单须含同前缀条目（否则 P1 工具全部 SENSITIVE_TABLE）`,
+      )
+    }
   }
   const driver = input.connection.driver ?? 'mysql2'
   if (driver !== 'mysql2' && driver !== 'cli') {

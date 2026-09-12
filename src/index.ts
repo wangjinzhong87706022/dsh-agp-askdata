@@ -27,9 +27,9 @@ import { askdataError } from './errors.ts'
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（SQL 12 工具：P0 五 + P1 六 + lookup_device；API P0 八工具）。 */
+  /** 全部工具面（SQL 12 工具：P0 五 + P1 六 + lookup_device；API 12 工具）。 */
   tools: AskdataTool[]
-  /** API 工具面（P0 八工具，新 API 网关）。 */
+  /** API 工具面（12 工具，新 API 网关）。 */
   apiTools: AskdataApiTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
   createContext(options?: {

@@ -46,7 +46,12 @@ export interface ApiPlan {
 
 /** API 执行口（ApiClient 满足该形状；测试可注入内存实现）。 */
 export interface ApiExecutor {
-  execute(method: 'GET' | 'POST', path: string, params: Record<string, unknown>): Promise<unknown>
+  execute(
+    method: 'GET' | 'POST',
+    path: string,
+    params: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>
 }
 
 /** 工具运行上下文。 */
@@ -96,22 +101,32 @@ export function validatePositiveInt(value: unknown, field: string): number {
   return n
 }
 
-/** tag_names 数组入参校验：非空数组、全为非空字符串。 */
+/** tag_names 上限（与 SQL 面 validateTagNames 对齐）：≤1000 个、单个 ≤256 字符。 */
+const MAX_TAG_NAMES = 1000
+const MAX_TAG_NAME_LENGTH = 256
+
+/** tag_names 数组入参校验：非空数组、全为非空字符串、数量与单值长度受限。 */
 export function validateTagNamesArg(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw askdataError('INVALID_PARAM', 'tag_names 必填且不能为空数组')
   }
+  if (value.length > MAX_TAG_NAMES) {
+    throw askdataError('INVALID_PARAM', `tag_names 超过 ${MAX_TAG_NAMES} 个上限`)
+  }
   return value.map((item) => {
     const s = String(item ?? '').trim()
     if (s === '') throw askdataError('INVALID_PARAM', 'tag_names 不能含空字符串')
+    if (s.length > MAX_TAG_NAME_LENGTH) {
+      throw askdataError('INVALID_PARAM', `tagName 超过 ${MAX_TAG_NAME_LENGTH} 字符: ${s.slice(0, 32)}...`)
+    }
     return s
   })
 }
 
-/** AGP 模型字段类型码 → ResultField.type（'1'/'11'/'22' 数值、'51' 时间日期 / '52' 日期，其余 string）。 */
+/** AGP 模型字段类型码 → ResultField.type（'1'/'11'/'22' 数值、'52' datetime，其余 string）。 */
 function resultFieldType(type: string): ResultField['type'] {
   if (type === '1' || type === '11' || type === '22') return 'number'
-  if (type === '51' || type === '52') return 'datetime'
+  if (type === '52') return 'datetime'
   return 'string'
 }
 
@@ -171,7 +186,7 @@ export async function runApiTool(
     const p = await plan()
     const method = p.request.method ?? 'GET'
     apiOrSql = `${method} API ${p.request.path}`
-    const raw = await ctx.apiClient.execute(method, p.request.path, p.request.params)
+    const raw = await ctx.apiClient.execute(method, p.request.path, p.request.params, { signal: ctx.signal })
     const described = p.describe(raw)
     const result = ok(tool.name, {
       apiOrSql,
