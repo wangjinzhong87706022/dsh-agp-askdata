@@ -12,10 +12,17 @@ import type { AuditRow } from '../src/audit.ts'
 import { knowledgeSearchTool } from '../tools/knowledge-search.ts'
 import { knowledgeGraphTool } from '../tools/knowledge-graph.ts'
 import { knowledgeWikiPageTool } from '../tools/knowledge-wiki-page.ts'
+import { knowledgeMindmapTool } from '../tools/knowledge-mindmap.ts'
 import { askdataDeepAnalysisTool } from '../tools/deep-analysis.ts'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+/** 取 mock fetch 第 n 次调用的请求体（JSON.parse 后）。 */
+function callBody(fetchImpl: unknown, n: number): Record<string, unknown> {
+  const calls = (fetchImpl as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls
+  return JSON.parse(String(calls[n]![1].body)) as Record<string, unknown>
 }
 
 /** 装配带 mock fetch 的知识面 ToolContext（审计开，收集审计行）。 */
@@ -82,6 +89,55 @@ describe('knowledge_search', () => {
     expect(r.errorCode).toBe('BACKEND_DOWN')
     expect(r.errorMessage).toContain('知识面')
   })
+
+  it('出处文档来自线上 doc_id/docnm_kwd 契约', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: [{ content_with_weight: '主汛期限制水位786.80m', doc_id: 'd1', docnm_kwd: '03-汛期调度运用计划.pdf', similarity: 0.9 }] },
+    }))
+    const r = await knowledgeSearchTool.run({ query: '汛限水位' }, knowledgeCtx(fetchImpl as never))
+    expect(r.data[0]).toMatchObject({ document: '03-汛期调度运用计划.pdf' })
+  })
+
+  it('labels 标签分布渲染为汇总行（rank=0）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        chunks: [{ content_with_weight: '证据', doc_id: 'd', docnm_kwd: 'n', similarity: 0.9 }],
+        labels: { '2021-09': 2, '洪水资料': 1 },
+      },
+    }))
+    const r = await knowledgeSearchTool.run({ query: '降雨' }, knowledgeCtx(fetchImpl as never))
+    expect(r.data).toHaveLength(2)
+    expect(r.data[0]).toMatchObject({ rank: 0, document: '（命中标签）' })
+    expect(String(r.data[0]!.content)).toContain('2021-09×2')
+  })
+
+  it('meta_filter 透传服务端 meta_data_filter', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: [{ content_with_weight: '证据', doc_id: 'd', docnm_kwd: 'n', similarity: 0.9 }] },
+    }))
+    const r = await knowledgeSearchTool.run(
+      { query: '2021年9月洪水降雨量', meta_filter: [{ key: 'flood_event', op: '=', value: '2021-09' }] },
+      knowledgeCtx(fetchImpl as never),
+    )
+    expect(r.success).toBe(true)
+    expect(r.apiOrSql).toContain('meta=')
+    const body = callBody(fetchImpl, 0)
+    const filter = body.meta_data_filter as { logic: string; conditions: Array<Record<string, unknown>> }
+    expect(filter).toMatchObject({ method: 'manual', logic: 'and' })
+    expect(filter.conditions[0]).toMatchObject({ key: 'flood_event', value: '2021-09' })
+  })
+
+  it('top_k 封顶生效：服务端返回 30 条，top_k=2 只出 2 行', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: Array.from({ length: 30 }, (_, i) => ({ content_with_weight: `片段${i}`, doc_id: 'd', docnm_kwd: 'n' })) },
+    }))
+    const r = await knowledgeSearchTool.run({ query: 'q', top_k: 2 }, knowledgeCtx(fetchImpl as never))
+    expect(r.rowCount).toBe(2)
+  })
 })
 
 describe('knowledge_graph', () => {
@@ -140,6 +196,53 @@ describe('knowledge_wiki_page', () => {
     const r = await knowledgeWikiPageTool.run({ slug: 'entity/不存在' }, knowledgeCtx(fetchImpl as never))
     expect(r.success).toBe(true)
     expect(String(r.data[0]!.summary)).toContain('没有该 wiki 页面')
+  })
+})
+
+describe('knowledge_mindmap', () => {
+  const mindmapBody = {
+    code: 0,
+    data: {
+      kind: 'mindmap',
+      templates: [{
+        entities: [
+          { name: '桃曲坡水库防洪抢险应急预案', type: 'central_topic', description: '预案中心主题', mention_count: 1, aliases: [], source_chunk_ids: [] },
+          { name: '应急响应', type: 'branch', description: '响应分级', mention_count: 1, aliases: [], source_chunk_ids: [] },
+          { name: 'I级响应', type: 'sub_branch', description: '超标准洪水与重大险情', mention_count: 1, aliases: [], source_chunk_ids: [] },
+        ],
+        relations: [
+          { from: '桃曲坡水库防洪抢险应急预案', to: '应急响应', type: 'has_branch' },
+          { from: '应急响应', to: 'I级响应', type: 'has_sub_branch' },
+        ],
+      }],
+    },
+  }
+
+  it('层级展开：path 带祖先路径，central_topic 排第一', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(mindmapBody))
+    const r = await knowledgeMindmapTool.run({}, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(true)
+    expect(r.data).toHaveLength(3)
+    expect(r.data[0]).toMatchObject({ level: 0, node: '桃曲坡水库防洪抢险应急预案', path: '桃曲坡水库防洪抢险应急预案' })
+    expect(r.data[2]).toMatchObject({ level: 2, node: 'I级响应', path: '桃曲坡水库防洪抢险应急预案 > 应急响应 > I级响应' })
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
+    expect(url).toContain('kind=mindmap')
+  })
+
+  it('keywords 透传服务端过滤分支', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(mindmapBody))
+    const r = await knowledgeMindmapTool.run({ keywords: '应急响应' }, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(true)
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
+    expect(url).toContain('keywords=')
+    expect(r.apiOrSql).toContain('keywords="应急响应"')
+  })
+
+  it('空脑图：成功返回一行指引（降级建议 knowledge_search/graph）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [] } }))
+    const r = await knowledgeMindmapTool.run({ keywords: '不存在' }, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(true)
+    expect(String(r.data[0]!.description)).toContain('knowledge_search')
   })
 })
 

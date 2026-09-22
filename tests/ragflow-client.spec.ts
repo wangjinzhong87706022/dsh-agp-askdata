@@ -22,6 +22,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
+/** 取 mock fetch 第 n 次调用的请求体（JSON.parse 后）。 */
+function callBody(fetchImpl: unknown, n: number): Record<string, unknown> {
+  const calls = (fetchImpl as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls
+  return JSON.parse(String(calls[n]![1].body)) as Record<string, unknown>
+}
+
 describe('RagflowClient.searchChunks（POST /datasets/search）', () => {
   it('业务失败（HTTP 200 + code≠0）抛 RagflowApiError', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ code: 100, message: 'dataset not found' }))
@@ -33,21 +39,54 @@ describe('RagflowClient.searchChunks（POST /datasets/search）', () => {
       code: 0,
       data: {
         chunks: [
-          { content_with_weight: '主汛期汛限水位 786.8m', document_id: 'doc1', document_keyword: '调度规程', similarity: '0.9123', chunk_id: 'ck1', positions: [[18, 108, 255, 221, 236]] },
-          { content: '   ', document_id: 'doc2' },
+          { content_with_weight: '主汛期汛限水位 786.8m', doc_id: 'doc1', docnm_kwd: '调度规程.pdf', similarity: '0.9123', chunk_id: 'ck1', positions: [[18, 108, 255, 221, 236]] },
+          { content: '   ', doc_id: 'doc2' },
         ],
       },
     }))
-    const chunks = await client(undefined, fetchImpl as never).searchChunks('汛限水位')
+    const { chunks } = await client(undefined, fetchImpl as never).searchChunks('汛限水位')
     expect(chunks).toHaveLength(1)
     expect(chunks[0]).toMatchObject({
       content: '主汛期汛限水位 786.8m',
       documentId: 'doc1',
-      documentName: '调度规程',
+      documentName: '调度规程.pdf',
       similarity: 0.9123,
       chunkId: 'ck1',
     })
     expect(chunks[0]!.positions).toEqual([[18, 108, 255, 221, 236]])
+  })
+
+  it('出处字段双契约：线上 doc_id/docnm_kwd 与旧版 document_id/document_keyword 都认', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: [{ content_with_weight: 'x', document_id: 'legacyDoc', document_keyword: 'legacy.pdf' }] },
+    }))
+    const { chunks } = await client(undefined, fetchImpl as never).searchChunks('q')
+    expect(chunks[0]).toMatchObject({ documentId: 'legacyDoc', documentName: 'legacy.pdf' })
+  })
+
+  it('top_k 客户端封顶：服务端返回 30 条也只取 topK（预算真实生效）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: Array.from({ length: 30 }, (_, i) => ({ content_with_weight: `片段${i}`, doc_id: 'd', docnm_kwd: 'n.pdf' })) },
+    }))
+    const { chunks } = await client(undefined, fetchImpl as never).searchChunks('q', { topK: 3 })
+    expect(chunks).toHaveLength(3)
+  })
+
+  it('labels 标签分布透传（标签库软重排命中计数）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: { chunks: [{ content_with_weight: 'x', doc_id: 'd', docnm_kwd: 'n' }], labels: { '2021-09': 2, '洪水资料': 1 } },
+    }))
+    const { labels } = await client(undefined, fetchImpl as never).searchChunks('q')
+    expect(labels).toEqual({ '2021-09': 2, '洪水资料': 1 })
+  })
+
+  it('labels 缺失/非对象 → 空对象', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { chunks: [] } }))
+    const { labels } = await client(undefined, fetchImpl as never).searchChunks('q')
+    expect(labels).toEqual({})
   })
 
   it('请求体带 dataset_ids / question / top_k，Authorization 头带 Bearer', async () => {
@@ -58,6 +97,31 @@ describe('RagflowClient.searchChunks（POST /datasets/search）', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-key')
     const body = JSON.parse(String(init.body))
     expect(body).toMatchObject({ dataset_ids: ['ds1', 'ds2'], question: '问题', top_k: 5 })
+  })
+
+  it('meta_filter 归一：裸数组/conditions 两种形态 → meta_data_filter（method/logic/conditions）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { chunks: [] } }))
+    // 裸数组
+    await client(undefined, fetchImpl as never).searchChunks('q', {
+      metaFilter: [{ key: 'flood_event', op: '=', value: '2021-09' }],
+    })
+    let body = callBody(fetchImpl, 0)
+    expect(body.meta_data_filter).toEqual({ method: 'manual', logic: 'and', conditions: [{ key: 'flood_event', op: '=', value: '2021-09' }] })
+    // conditions 形态 + logic=or
+    await client(undefined, fetchImpl as never).searchChunks('q', {
+      metaFilter: { conditions: [{ key: 'doc_type', op: '=', value: '表格' }], logic: 'or' },
+    })
+    body = callBody(fetchImpl, 1)
+    expect(body.meta_data_filter).toMatchObject({ method: 'manual', logic: 'or' })
+  })
+
+  it('meta_filter 非法条件（空 key / 非标量 value）整体忽略', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { chunks: [] } }))
+    await client(undefined, fetchImpl as never).searchChunks('q', {
+      metaFilter: [{ key: '', op: '=', value: 'x' }, { key: 'k', op: '=', value: { nested: 1 } }],
+    })
+    const body = callBody(fetchImpl, 0)
+    expect(body.meta_data_filter).toBeUndefined()
   })
 
   it('未配置 datasetIds 时 INVALID_PARAM（不触网）', async () => {
@@ -190,7 +254,7 @@ describe('RagflowClient.getPage / listPages', () => {
   })
 })
 
-describe('RagflowClient.structure（GET /artifacts/structure?kind=）', () => {
+describe('RagflowClient.structure / mindmap', () => {
   it('kind 透传 + entities/relations 归一', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({
       code: 0,
@@ -211,6 +275,79 @@ describe('RagflowClient.structure（GET /artifacts/structure?kind=）', () => {
     expect(sub.relations[0]).toMatchObject({ from: '王鹏', to: '飞龙公司', predicate: '任职于' })
     const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
     expect(url).toContain('kind=graph')
+  })
+
+  it('mindmap 关系谓词回退 type（has_branch/has_sub_branch）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        kind: 'mindmap',
+        templates: [{
+          entities: [
+            { name: '应急预案', type: 'central_topic', description: '中心主题', mention_count: 1, aliases: [], source_chunk_ids: [] },
+            { name: '应急响应', type: 'branch', description: '分支', mention_count: 1, aliases: [], source_chunk_ids: [] },
+            { name: 'I级响应', type: 'sub_branch', description: '子分支', mention_count: 1, aliases: [], source_chunk_ids: [] },
+          ],
+          relations: [
+            { from: '应急预案', to: '应急响应', type: 'has_branch' },
+            { from: '应急响应', to: 'I级响应', type: 'has_sub_branch' },
+          ],
+        }],
+      },
+    }))
+    const sub = await client(undefined, fetchImpl as never).structure('mindmap')
+    expect(sub.relations[0]).toMatchObject({ from: '应急预案', to: '应急响应', predicate: 'has_branch' })
+
+    const forest = await client(undefined, fetchImpl as never).mindmap()
+    expect(forest).toHaveLength(1)
+    expect(forest[0]).toMatchObject({ name: '应急预案', type: 'central_topic' })
+    expect(forest[0]!.children[0]).toMatchObject({ name: '应急响应' })
+    expect(forest[0]!.children[0]!.children[0]).toMatchObject({ name: 'I级响应' })
+  })
+
+  it('mindmap 环/悬空边安全：自环与未知目标跳过，无 central_topic 时无父节点为根', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        kind: 'mindmap',
+        templates: [{
+          entities: [
+            { name: 'A', type: 'branch', description: '', mention_count: 1, aliases: [], source_chunk_ids: [] },
+            { name: 'B', type: 'sub_branch', description: '', mention_count: 1, aliases: [], source_chunk_ids: [] },
+          ],
+          relations: [
+            { from: 'A', to: 'B', type: 'has_branch' },
+            { from: 'B', to: 'A', type: 'has_branch' },
+            { from: 'A', to: 'A', type: 'has_branch' },
+            { from: 'B', to: '未知X', type: 'has_branch' },
+          ],
+        }],
+      },
+    }))
+    const forest = await client(undefined, fetchImpl as never).mindmap()
+    expect(forest).toHaveLength(1)
+    expect(forest[0]!.name).toBe('A')
+    expect(forest[0]!.children.map((c) => c.name)).toEqual(['B'])
+    expect(forest[0]!.children[0]!.children).toEqual([])
+  })
+
+  it('mindmap keywords 透传服务端', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [] } }))
+    const forest = await client(undefined, fetchImpl as never).mindmap({ keywords: '应急响应' })
+    expect(forest).toEqual([])
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
+    expect(url).toContain('kind=mindmap')
+    expect(url).toContain('keywords=')
+  })
+
+  it('mindmap 节点预算封顶（maxGraphEntities）', async () => {
+    const entities = Array.from({ length: 10 }, (_, i) => ({ name: `N${i}`, type: 'sub_branch', description: '', mention_count: 1, aliases: [], source_chunk_ids: [] }))
+    const relations = entities.slice(0, -1).map((e, i) => ({ from: e.name, to: `N${i + 1}`, type: 'has_branch' }))
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [{ entities, relations }] } }))
+    const forest = await client({ maxGraphEntities: 4 }, fetchImpl as never).mindmap()
+    const count = (nodes: Array<{ children: unknown[] }>): number =>
+      nodes.reduce((sum, n) => sum + 1 + count(n.children as Array<{ children: unknown[] }>), 0)
+    expect(count(forest)).toBe(4)
   })
 })
 

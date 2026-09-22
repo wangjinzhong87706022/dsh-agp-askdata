@@ -32,6 +32,15 @@ export interface KnowledgeChunk {
   imageId?: string
 }
 
+/** search 响应顶层标签分布（标签库软重排命中计数，如 {"2021-09":1,"洪水资料":1}）。 */
+export type KnowledgeLabels = Record<string, number>
+
+/** searchChunks 返回：片段清单 + 标签分布（标签库软重排结果，用于引用分类标注）。 */
+export interface KnowledgeSearchOutcome {
+  chunks: KnowledgeChunk[]
+  labels: KnowledgeLabels
+}
+
 /** wiki 页面清单项。 */
 export interface KnowledgePageItem {
   slug: string
@@ -94,8 +103,23 @@ export interface KnowledgeSubgraph {
   center?: string
 }
 
+/** 脑图节点（父子层级；森林形态——每个 central_topic 一棵树）。 */
+export interface MindmapNode {
+  name: string
+  /** central_topic / branch / sub_branch（服务端编译产物类型）。 */
+  type: string
+  description: string
+  children: MindmapNode[]
+}
+
 export interface SearchChunksOptions {
   topK?: number
+  /**
+   * 元数据硬过滤（RAGFlow meta_data_filter 契约）。简化形态：
+   * `{ conditions: [{ key, op, value }], logic?: 'and' | 'or' }` 或裸数组
+   * `[{ key, op, value }]`（逻辑默认 and）。客户端补全 method 字段。
+   */
+  metaFilter?: Record<string, unknown> | Array<Record<string, unknown>>
   signal?: AbortSignal
   fetchImpl?: typeof fetch
 }
@@ -264,46 +288,83 @@ export class RagflowClient {
   }
 
   /**
+   * 元数据硬过滤形态归一：裸数组 / {conditions} → RAGFlow meta_data_filter 全量形态。
+   * 条件逐条净化（key/op/value 只允许标量）；非法条件整体忽略（不过滤），
+   * 由服务端做最终校验——客户端不静默篡改语义。
+   */
+  private normalizeMetaFilter(
+    input: Record<string, unknown> | Array<Record<string, unknown>> | undefined,
+  ): Record<string, unknown> | undefined {
+    if (input === undefined || input === null) return undefined
+    const raw = Array.isArray(input) ? { conditions: input } : input
+    const conditionsRaw = Array.isArray(raw.conditions) ? raw.conditions : []
+    const conditions = conditionsRaw
+      .filter((c): c is Record<string, unknown> => c !== null && typeof c === 'object' && !Array.isArray(c))
+      .map((c) => ({ key: String(c.key ?? ''), op: String(c.op ?? '='), value: c.value }))
+      .filter((c) => c.key.length > 0 && ['string', 'number', 'boolean'].includes(typeof c.value))
+    if (conditions.length === 0) return undefined
+    const logic = raw.logic === 'or' ? 'or' : 'and'
+    return { method: 'manual', logic, conditions }
+  }
+
+  /**
    * 原文片段检索（多数据集一次调用）。
    *
    * 与 dsh-plugins/lingzhi-knowledge-tool 的 searchDatasets 契约一致：
    * dataset_ids 数组 + question + top_k + rerank_candidates_count。
+   *
+   * 注意（实测）：`top_k` 只是 kNN 候选池，返回条数由服务端 page_size（默认 30）
+   * 控制——客户端按 topK 截断，保证知识面预算配置真实生效。
+   * 出处字段容错：线上响应用 `doc_id`/`docnm_kwd`，旧契约用
+   * `document_id`/`document_keyword`，两者都认。
    */
-  async searchChunks(question: string, options: SearchChunksOptions = {}): Promise<KnowledgeChunk[]> {
+  async searchChunks(question: string, options: SearchChunksOptions = {}): Promise<KnowledgeSearchOutcome> {
     const datasetIds = this.requireDatasets()
     const topK = Math.min(50, Math.max(1, Math.trunc(options.topK ?? this.config.maxChunks)))
-    const data = await this.postJson(
-      '/datasets/search',
-      {
-        dataset_ids: datasetIds,
-        question,
-        top_k: topK,
-        rerank_candidates_count: Math.max(topK * 4, 40),
-      },
-      options.signal,
-      options.fetchImpl,
-    )
-    const rawChunks = (data as { chunks?: unknown } | null)?.chunks
-    if (!Array.isArray(rawChunks)) return []
-    const chunks: KnowledgeChunk[] = []
-    for (const item of rawChunks) {
-      if (item === null || typeof item !== 'object') continue
-      const c = item as Record<string, unknown>
-      const content = str(c.content_with_weight) || str(c.content)
-      if (content.trim().length === 0) continue
-      const positions = positionsOf(c)
-      chunks.push({
-        content,
-        documentId: str(c.document_id),
-        documentName: str(c.document_keyword) || str(c.document_name),
-        similarity: toNumber(c.similarity),
-        ...(str(c.chunk_id) || str(c.id) ? { chunkId: str(c.chunk_id) || str(c.id) } : {}),
-        ...(positions ? { positions } : {}),
-        ...(toNumber(c.page_num) !== null ? { pageNum: toNumber(c.page_num) } : {}),
-        ...(str(c.image_id) ? { imageId: str(c.image_id) } : {}),
-      })
+    const payload: Record<string, unknown> = {
+      dataset_ids: datasetIds,
+      question,
+      top_k: topK,
+      rerank_candidates_count: Math.max(topK * 4, 40),
     }
-    return chunks
+    const metaFilter = this.normalizeMetaFilter(options.metaFilter)
+    if (metaFilter) payload.meta_data_filter = metaFilter
+
+    const data = await this.postJson('/datasets/search', payload, options.signal, options.fetchImpl)
+    const rawChunks = (data as { chunks?: unknown } | null)?.chunks
+    const chunks: KnowledgeChunk[] = []
+    if (Array.isArray(rawChunks)) {
+      for (const item of rawChunks) {
+        if (item === null || typeof item !== 'object') continue
+        const c = item as Record<string, unknown>
+        const content = str(c.content_with_weight) || str(c.content)
+        if (content.trim().length === 0) continue
+        const positions = positionsOf(c)
+        chunks.push({
+          content,
+          // 出处双契约：线上 doc_id/docnm_kwd，旧版 document_id/document_keyword
+          documentId: str(c.doc_id) || str(c.document_id),
+          documentName: str(c.docnm_kwd) || str(c.document_keyword) || str(c.document_name),
+          similarity: toNumber(c.similarity),
+          ...(str(c.chunk_id) ? { chunkId: str(c.chunk_id) } : {}),
+          ...(positions ? { positions } : {}),
+          ...(toNumber(c.page_num) !== null ? { pageNum: toNumber(c.page_num) } : {}),
+          ...(str(c.image_id) ? { imageId: str(c.image_id) } : {}),
+        })
+      }
+    }
+
+    // 标签分布（标签库软重排）：{"标签名": 命中数}；缺失/空为 {}
+    const rawLabels = (data as { labels?: unknown } | null)?.labels
+    const labels: KnowledgeLabels = {}
+    if (rawLabels !== null && typeof rawLabels === 'object' && !Array.isArray(rawLabels)) {
+      for (const [key, value] of Object.entries(rawLabels as Record<string, unknown>)) {
+        const n = toNumber(value)
+        if (key && n !== null) labels[key] = n
+      }
+    }
+
+    return { chunks: chunks.slice(0, topK), labels }
   }
 
   /** wiki 页面清单（keywords 命中 title/summary；多数据集合并）。 */
@@ -461,7 +522,7 @@ export class RagflowClient {
           relations.push({
             from,
             to,
-            predicate: str(row.predicate) || str(row.keywords),
+            predicate: str(row.predicate) || str(row.keywords) || str(row.type),
             weight: toNumber(row.weight) ?? 0,
             description: str(row.description),
             datasetId,
@@ -536,7 +597,7 @@ export class RagflowClient {
           relations.push({
             from,
             to,
-            predicate: str(row.predicate) || str(row.keywords),
+            predicate: str(row.predicate) || str(row.keywords) || str(row.type),
             weight: toNumber(row.weight) ?? 0,
             description: str(row.description),
             datasetId,
@@ -549,5 +610,56 @@ export class RagflowClient {
     const entities = [...entityBySlug.values()]
     const known = new Set(entities.map((e) => e.slug))
     return { entities, relations: relations.filter((r) => known.has(r.from) && known.has(r.to)) }
+  }
+
+  /**
+   * 脑图层级森林（mindmap 编译产物，父子边为 has_branch/has_sub_branch）。
+   *
+   * 与 structure('mindmap') 的差别：把 entities+relations 组装成树——
+   * central_topic 为根，无入边的节点为根（兜底），环/悬空边安全跳过。
+   * `keywords` 透传服务端做种子过滤。
+   */
+  async mindmap(options: { keywords?: string; signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<MindmapNode[]> {
+    const sub = await this.structure('mindmap', options)
+    const cap = this.config.maxGraphEntities
+    const byName = new Map(sub.entities.map((e) => [e.name, e]))
+    const childrenOf = new Map<string, string[]>()
+    const hasParent = new Set<string>()
+    for (const rel of sub.relations) {
+      if (!byName.has(rel.from) || !byName.has(rel.to) || rel.from === rel.to) continue
+      const list = childrenOf.get(rel.from) ?? []
+      if (!list.includes(rel.to)) list.push(rel.to)
+      childrenOf.set(rel.from, list)
+      hasParent.add(rel.to)
+    }
+
+    // 根：central_topic 优先，其次无父节点；都没有则取前几个实体（防空树）
+    const roots = sub.entities.filter((e) => e.type === 'central_topic').map((e) => e.name)
+    if (roots.length === 0) {
+      roots.push(...sub.entities.filter((e) => !hasParent.has(e.name)).map((e) => e.name))
+    }
+    if (roots.length === 0 && sub.entities.length > 0) roots.push(sub.entities[0]!.name)
+
+    let budget = cap
+    const build = (name: string, seen: Set<string>): MindmapNode | null => {
+      if (budget <= 0 || seen.has(name)) return null
+      const entity = byName.get(name)
+      if (!entity) return null
+      seen.add(name)
+      budget -= 1
+      const children: MindmapNode[] = []
+      for (const child of childrenOf.get(name) ?? []) {
+        const node = build(child, seen)
+        if (node) children.push(node)
+      }
+      return { name, type: entity.type, description: entity.description, children }
+    }
+
+    const forest: MindmapNode[] = []
+    for (const root of roots) {
+      const node = build(root, new Set())
+      if (node) forest.push(node)
+    }
+    return forest
   }
 }

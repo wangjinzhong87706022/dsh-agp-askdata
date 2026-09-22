@@ -16,8 +16,8 @@ function defaultConfig(): ReturnType<typeof Config> {
 describe('配置页默认值可装配', () => {
   it('schema 默认值经 toRuntimeConfig → createAskdataService 全程通过', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    // P0 五 + P1 六 + subagent 一 + 知识面三 = 15
-    expect(service.tools).toHaveLength(15)
+    // P0 五 + P1 六 + subagent 一 + 知识面四 = 16
+    expect(service.tools).toHaveLength(16)
     expect(service.config.query.aggregateTable).toBe('WT_CUBE')
     expect(service.config.query.cubeTypeMap[7]).toBe(DEFAULT_CUBE_TYPE_MAP[7])
     expect(service.config.query.granularityMap['1D']).toBe(2)

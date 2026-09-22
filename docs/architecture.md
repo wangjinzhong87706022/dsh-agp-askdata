@@ -631,13 +631,14 @@ ORDER BY alarm_time DESC LIMIT 5
 
 > DSH 提供三类扩展机制来增强插件在 Agent 中使用：tool（每次自动注入）、skill（按需加载的手册）、subagent（独立工作流）。askdata 同时使用三种机制——模型常用基础工具、用户/复杂场景用 skill 查阅手册、整句自然语言用 deep_analysis 走子 agent 流水线。
 
-### 17.1 工具层（已完成，P0 + P1 + subagent-style 共 12 个）
+### 17.1 工具层（已完成，P0 + P1 + subagent-style + 知识面共 16 个）
 
 | 层 | 工具 | 说明 |
 |---|---|---|
 | P0 | `lookup_tag` / `estimate_count` / `latest_value` / `time_series` / `aggregate` | 基础取数链 |
 | P1 | `lookup_model` / `lookup_object` / `lookup_tag_definition` / `resolve_tag` / `query_alarm` / `query_alarm_config` | 元数据/告警 |
 | **subagent-style** | **`askdata_deep_analysis`** | **自然语言问数入口：内部按关键词自动编排 lookup → resolve → 取数流水线并返回带溯源的合成结果** |
+| P2 知识面 | `knowledge_graph` / `knowledge_search` / `knowledge_wiki_page` / `knowledge_mindmap` | RAGFlow 知识库：实体关系子图 / 原文取证（元数据过滤+标签回显）/ 百科页面 / 脑图层级（§18） |
 
 `askdata_deep_analysis`（`tools/deep-analysis.ts`）是 DSH subagent one-shot 委派的 in-process 等价物：它把"自主完成多步任务 + 给出完整结论"的子 agent 行为封装在一个工具调用里，避免调用方自己编排 N 次工具。本插件不依赖宿主 `@deepseek-ai/dsh-agents` runtime，故采用工具内 pipeline 实现。关键词分支：
 
@@ -753,3 +754,42 @@ ORDER BY alarm_time DESC LIMIT 5
 - E2E：dsh web（DSH_HOME=E:\dsh\home-e2e，3080 端口 token 鉴权）三链路——
   知识取证（问汛限水位依据 → knowledge_search 命中规程片段）、取数（库容/电流）、
   图谱（实体关联）；详见 docs/RAGFLOW-REBUILD-20260922.md 的 E2E 章节。
+
+### 18.5 检索增强与缺陷修复（2026-09-22 追加）
+
+对 RAGFlow 全功能面（检索参数 / 编译工件 / chunk 层 / 导航）做过一轮盘点后落地三项增强，
+并修复首轮融合的两个实证缺陷：
+
+**缺陷修复（线上响应契约对拍发现）**：
+
+1. 出处字段丢失——线上 `/datasets/search` 响应用 `doc_id` / `docnm_kwd`（实测
+   `docnm_kwd: '03-汛期调度运用计划.pdf'`），首轮客户端读 `document_id` /
+   `document_keyword`（lingzhi 旧契约），导致 documentId/documentName 恒空、引用溯源断。
+   现双契约都认（`doc_id || document_id`，`docnm_kwd || document_keyword || document_name`）。
+2. top_k 未客户端封顶——`top_k` 只是 kNN 候选池，返回条数由服务端 page_size（默认 30）
+   控制，请求 topK=2 实收 30 条，`knowledge.maxChunks` 预算失效。现返回前按 topK 截断。
+
+**P0-1 mindmap 脑图融合**：`knowledge_mindmap` 工具 + 客户端 `mindmap()` 森林构建。
+数据源 `GET /datasets/{id}/artifacts/structure?kind=mindmap`；relations 的谓词回退 `type`
+字段（has_branch / has_sub_branch 父子边）；central_topic 为根、无父节点兜底、环/悬空边
+安全跳过、节点数受 `knowledge.maxGraphEntities` 封顶。规程与预案库已编译 44 节点
+（应急响应分级、险情种类与危害、物资保障等分支），零服务端投入。与 knowledge_graph
+（关系网络）互补：脑图答"分层结构"，图谱答"关联网络"。
+
+**P0-2 元数据硬过滤**：`knowledge_search` 增 `meta_filter` 参数（裸数组或
+`{conditions, logic}` 形态，客户端归一为 RAGFlow `meta_data_filter` 全量契约；
+条件逐条净化，非法条件整体忽略不过滤）。洪水资料库已挂 `flood_event`（2021-09/2021-10）、
+`doc_type`（文本/表格）、`quality` 等元数据——"2021 年 9 月那场洪水的降雨量"按场次
+过滤后取证不再被其它场次片段稀释。
+
+**P0-3 标签分布回显**：`/datasets/search` 响应顶层 `labels`（标签库软重排命中计数，
+实测 `{"2021-09":2,"洪水资料":1}`）此前被丢弃；现投影为 `KnowledgeLabels` 并在工具
+输出渲染 rank=0 汇总行，模型引用时可带"该片段属于哪场洪水/哪类资料"的分类标注。
+
+**工具面**：15 → 16（新增 knowledge_mindmap）。测试 225 例通过（新增 17 例：出处双契约、
+top_k 封顶、labels、meta_filter 归一/非法条件、mindmap 森林/环安全/预算/keywords）。
+线上直连冒烟（scripts/live-smoke-knowledge.ts + 探针）：出处 `03-汛期调度运用计划.pdf`
+（doc_id 同步带出）、topK=5 实收 5 条、mindmap 44 节点单树（9 个一级分支）、
+meta_filter 场次限定生效。dsh web E2E 10/11（六条功能链路全过；唯一未过项为 genui
+对模型某轮 dsh-ui 围栏的解析警告，客户端容错行为，与知识工具无关），
+详见 docs/RAGFLOW-REBUILD-20260922.md。
