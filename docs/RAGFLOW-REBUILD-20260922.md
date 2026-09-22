@@ -41,3 +41,33 @@ examples/ragflow（`@deepseek-ai/dsh-ragflow`）lib/src/配置被外部清空。
 ## 启动方式（home-e2e）
 
 `powershell -File E:\dsh\home-e2e\start-web-e2e.ps1`（设 `DSH_HOME=E:\dsh\home-e2e`，从 `E:\dsh\home\.credentials.yaml` 静默注入 RAGFLOW_API_KEY/WEIXIN_LLM_API_KEY/AGP_API_TOKEN/AGP_API_OPENID，脱离会话启动，token 落 `web-run29.log`）。
+
+## 知识面融合 E2E（2026-09-22，graph + wiki）
+
+**背景**：分析 `E:\git\ragflow-import` 的 graph（graphrag_port / build_graph_local.py）与
+wiki（wiki_port / build_wiki_local.py）能力后，确认线上 RAGFlow v0.27.x 已开放服务端同构 API
+（artifacts 系列），在 dsh-agp-askdata 新增知识面 3 工具（knowledge_search / knowledge_graph /
+knowledge_wiki_page）+ resolve_tag 别名归一化 + deep_analysis 知识分支，共 15 工具。
+
+**启动方式（home-e2e）**：`powershell -File E:\dsh\home-e2e\start-web-e2e.ps1`（DSH_HOME=E:\dsh\home-e2e，
+3080 端口 token 鉴权；RAGFLOW_API_KEY 经启动环境变量注入，不落盘）。lib/ 由 `pnpm tsdown` 构建。
+
+**E2E 脚本**：`E:\git\deepseek-harness\apps\web\tests\e2e-knowledge-fusion.mjs`（playwright 直驱，
+token 自动取最新 web-run*.log）。
+
+**结果（8/8 通过）**：
+
+| 链路 | 断言 | 结果 |
+|---|---|---|
+| ① 知识取证 | knowledge_search 工具调用在 UI 可见；回答命中汛限水位 786.8（规程库片段） | ✅ |
+| ② 图谱关联 | knowledge_graph 调用可见；关联机构命中（灌溉中心/水务局） | ✅ |
+| ③ 取数面 | 库容 5720 万m³（TSDB 链路未被融合破坏） | ✅ |
+| ④ wiki 页面 | knowledge_wiki_page 调用可见 | ✅ |
+| 全局 | 无 >=400 资源；console 干净 | ✅ |
+
+截图：`E:\dsh\home-e2e\shots\kg-{1-knowledge-search,2-knowledge-graph,3-agp-data,4-wiki-page}.png`。
+
+**直连冒烟**（`scripts/live-smoke-knowledge.ts`，真实 API key 打六端点）：searchChunks 22 段
+（top 命中"主汛期限制水位 786.80m"规程原文）；subgraph(node) 15 实体/14 关系；
+subgraph(keywords) 10 实体；listPages 5 页；getPage 正文 10793 字/出链 101；structure(graph)
+259 实体/341 关系。

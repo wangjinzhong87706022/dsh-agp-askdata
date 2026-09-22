@@ -16,10 +16,40 @@ function defaultConfig(): ReturnType<typeof Config> {
 describe('配置页默认值可装配', () => {
   it('schema 默认值经 toRuntimeConfig → createAskdataService 全程通过', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    expect(service.tools).toHaveLength(12)
+    // P0 五 + P1 六 + subagent 一 + 知识面三 = 15
+    expect(service.tools).toHaveLength(15)
     expect(service.config.query.aggregateTable).toBe('WT_CUBE')
     expect(service.config.query.cubeTypeMap[7]).toBe(DEFAULT_CUBE_TYPE_MAP[7])
     expect(service.config.query.granularityMap['1D']).toBe(2)
+  })
+
+  it('知识面默认不装配（datasetIds 空），取数面不受影响', () => {
+    const service = createAskdataService(toRuntimeConfig(defaultConfig()))
+    expect(service.config.knowledge.datasetIds).toEqual([])
+    expect(service.tools.map((t) => t.name)).toContain('knowledge_search')
+    const ctx = service.createContext()
+    expect(ctx.knowledge).toBeUndefined()
+  })
+
+  it('配置 datasetIds 后知识面客户端装配进 ToolContext', () => {
+    const service = createAskdataService({
+      connection: { host: 'fe.example.com', port: 9030, user: 'u', password: 'p', database: 'WT_DB' },
+      knowledge: { datasetIds: ['fda7a510a87c11f1998b3dc126099a8d'] },
+    })
+    expect(service.config.knowledge.datasetIds).toHaveLength(1)
+    expect(service.createContext().knowledge).toBeDefined()
+  })
+
+  it('知识面配置校验：非法基址 / 非法数据集 id 加载期报错', () => {
+    const conn = { host: 'fe.example.com', port: 9030, user: 'u', password: 'p', database: 'WT_DB' }
+    expect(() => createAskdataService({
+      connection: conn,
+      knowledge: { ragflowBaseUrl: 'ftp://nope' },
+    })).toThrow(/ragflowBaseUrl/)
+    expect(() => createAskdataService({
+      connection: conn,
+      knowledge: { datasetIds: ['has spaces'] },
+    })).toThrow(/datasetIds/)
   })
 
   it('默认值里的连接留空（不烙印内网拓扑），host/database 必填由 schema 强制', () => {
@@ -88,5 +118,12 @@ describe('配置页元数据（schemastery meta → DSH 渲染）', () => {
   it('readOnly 不出现在页面（P0 红线不开放配置）', () => {
     const security = asDict(Config as any).security
     expect(asDict(security).readOnly).toBeUndefined()
+  })
+
+  it('知识面 API Key 走 secret 角色；分组可折叠带说明', () => {
+    const knowledge = asDict(Config as any).knowledge
+    expect(asDict(knowledge).ragflowApiKey.meta.role).toBe('secret')
+    expect(knowledge.meta.collapse).toBe(true)
+    expect(knowledge.meta.description).toContain('RAGFlow')
   })
 })

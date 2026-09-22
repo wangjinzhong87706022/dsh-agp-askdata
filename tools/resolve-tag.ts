@@ -20,12 +20,13 @@ import {
 import { validateFilterText, validateGranularity } from '../src/sql/validate.ts'
 import { assertSafeToExecute } from '../src/sql/whitelist.ts'
 import { askdataError } from '../src/errors.ts'
+import { slugName } from '../src/clients/ragflow.ts'
 
 /** resolve_tag 工具定义。 */
 export const resolveTagTool: AskdataTool = {
   name: 'resolve_tag',
   description:
-    '将中文设备名+中文测点名解析为 tagName+tagIndex。5 步链路：查设备→查测点编码→拼 tagName→验注册→查 tagIndex。用户用中文描述测点（如"1号逆变器直流电压"）时必须先调用本工具。',
+    '将中文设备名+中文测点名解析为 tagName+tagIndex。5 步链路：查设备→查测点编码→拼 tagName→验注册→查 tagIndex。用户用中文描述测点（如"1号逆变器直流电压"）时必须先调用本工具。设备名未命中时自动查知识图谱（实体别名）归一化后重试一次。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
@@ -49,10 +50,24 @@ export const resolveTagTool: AskdataTool = {
 
       const mysqlWl = ctx.config.security.mysqlTableWhitelist
 
-      // step1: 查设备 id + class__path
-      const step1Sql = resolveTagStep1Sql(ctx.config, deviceName, ctx.config.appId)
-      assertSafeToExecute(step1Sql, mysqlWl)
-      const step1 = await ctx.mysqlExecutor.execute(step1Sql, { signal: ctx.signal })
+      // step1: 查设备 id + class__path（未命中时经知识图谱别名归一化重试一次）
+      const lookupDevice = async (name: string) => {
+        const sql = resolveTagStep1Sql(ctx.config, name, ctx.config.appId)
+        assertSafeToExecute(sql, mysqlWl)
+        return ctx.mysqlExecutor.execute(sql, { signal: ctx.signal })
+      }
+      let step1 = await lookupDevice(deviceName)
+      if (step1.rows.length === 0) {
+        const aliasCandidates = await knowledgeAliasCandidates(ctx, deviceName)
+        for (const candidate of aliasCandidates) {
+          if (candidate === deviceName) continue
+          step1 = await lookupDevice(candidate)
+          if (step1.rows.length > 0) {
+            ctx.log?.(`resolve_tag: 设备名经知识图谱归一化 ${deviceName} → ${candidate}`)
+            break
+          }
+        }
+      }
       if (step1.rows.length === 0) {
         throw askdataError('OBJECT_NOT_FOUND', `设备未找到: ${deviceName}`)
       }
@@ -122,4 +137,30 @@ export const resolveTagTool: AskdataTool = {
       }
     })
   },
+}
+
+/**
+ * 知识图谱别名归一化：设备名未命中设备表时，查 RAGFlow 实体子图拿标准名与别名
+ * 作为重试候选（ragflow-import 的 DomainKnowledgeDict 在服务端的同构能力）。
+ *
+ * 知识面不可用/超时/无命中都返回空数组——归一化是增强不是依赖，失败不影响
+ * resolve_tag 原有错误语义（仍报 OBJECT_NOT_FOUND）。
+ */
+async function knowledgeAliasCandidates(ctx: ToolContext, deviceName: string): Promise<string[]> {
+  if (!ctx.knowledge) return []
+  try {
+    const sub = await ctx.knowledge.subgraph({ node: deviceName, topN: 8, signal: ctx.signal })
+    const names: string[] = []
+    for (const entity of sub.entities) {
+      const name = slugName(entity.slug)
+      if (name && name !== deviceName) names.push(name)
+      for (const alias of entity.aliases) {
+        if (alias && alias !== deviceName) names.push(alias)
+      }
+    }
+    // 去重保序；标准名（与输入不同的实体名）优先于别名
+    return [...new Set(names)].slice(0, 6)
+  } catch {
+    return []
+  }
 }

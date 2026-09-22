@@ -123,6 +123,18 @@ export const Config = z.object({
     orgId: z.string().default('').description('审计写入者身份：组织'),
   }).collapse().description('审计'),
 
+  knowledge: z.object({
+    ragflowBaseUrl: z.string().default('https://labragf.openagp.top:9080')
+      .description('RAGFlow 实例基址（不含 /api/v1；客户端自动拼接）'),
+    ragflowApiKey: z.string().role('secret').default('')
+      .description('RAGFlow API Key（Bearer；进程内使用不落盘。留空回退环境变量 RAGFLOW_API_KEY）'),
+    datasetIds: z.array(z.string()).default([])
+      .description('知识检索目标数据集 id 列表（RAGFlow dataset id；空 = 知识工具不可用，取数面不受影响）'),
+    timeoutMs: z.number().default(20_000).min(1000).description('单次知识调用超时（毫秒）'),
+    maxChunks: z.number().default(8).min(1).max(50).description('knowledge_search 默认返回片段数'),
+    maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph 默认实体预算（服务端上限 1024）'),
+  }).collapse().description('RAGFlow 知识面（graph/wiki/原文检索；问数的第二数据源：TSDB 给数值，知识库给依据）'),
+
   installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
   presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）'),
 })
@@ -176,6 +188,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
     system: config.system,
     security: config.security,
     audit: config.audit,
+    knowledge: config.knowledge,
   }
 }
 
