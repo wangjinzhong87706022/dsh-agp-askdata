@@ -132,7 +132,7 @@ export const Config = z.object({
       .description('知识检索目标数据集 id 列表（RAGFlow dataset id；空 = 知识工具不可用，取数面不受影响）'),
     timeoutMs: z.number().default(20_000).min(1000).description('单次知识调用超时（毫秒）'),
     maxChunks: z.number().default(8).min(1).max(50).description('knowledge_search 默认返回片段数'),
-    maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph 默认实体预算（服务端上限 1024）'),
+    maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph / knowledge_mindmap 默认实体/节点预算（服务端上限 1024）'),
   }).collapse().description('RAGFlow 知识面（graph/wiki/原文检索；问数的第二数据源：TSDB 给数值，知识库给依据）'),
 
   installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),

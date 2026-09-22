@@ -55,17 +55,23 @@ knowledge_wiki_page）+ resolve_tag 别名归一化 + deep_analysis 知识分支
 **E2E 脚本**：`E:\git\deepseek-harness\apps\web\tests\e2e-knowledge-fusion.mjs`（playwright 直驱，
 token 自动取最新 web-run*.log）。
 
-**结果（8/8 通过）**：
+**第一轮结果（8/8 通过）**：知识取证（786.8 命中）、图谱关联、取数面（5720 万m³）、
+wiki 页面、全局健康全过。
+
+**第二轮（修复 + mindmap/meta_filter/labels 增强后，10/11 通过）**：
 
 | 链路 | 断言 | 结果 |
 |---|---|---|
-| ① 知识取证 | knowledge_search 工具调用在 UI 可见；回答命中汛限水位 786.8（规程库片段） | ✅ |
-| ② 图谱关联 | knowledge_graph 调用可见；关联机构命中（灌溉中心/水务局） | ✅ |
-| ③ 取数面 | 库容 5720 万m³（TSDB 链路未被融合破坏） | ✅ |
+| ① 知识取证 | knowledge_search 调用可见；汛限水位 786.8 命中 | ✅ |
+| ② 图谱关联 | knowledge_graph 调用可见；关联机构命中 | ✅ |
+| ③ 取数面 | 库容 5720 万m³（未被融合破坏） | ✅ |
 | ④ wiki 页面 | knowledge_wiki_page 调用可见 | ✅ |
-| 全局 | 无 >=400 资源；console 干净 | ✅ |
+| ⑤ 脑图导航 | knowledge_mindmap 调用可见；应急响应/I级分支命中（关键词过滤 6 节点） | ✅ |
+| ⑥ 元数据过滤 | knowledge_search + meta_filter(flood_event=2021-09) 场次限定取证 | ✅ |
+| 全局 | 无 >=400 资源 | ✅ |
+| 全局 | console 干净 | ⚠️ 1 条 genui 警告（模型某轮输出的 dsh-ui 围栏解析失败，客户端容错保留代码块；知识工具只返 JSON 不产 dsh-ui 围栏，非本次改动引入，上轮同检查通过） |
 
-截图：`E:\dsh\home-e2e\shots\kg-{1-knowledge-search,2-knowledge-graph,3-agp-data,4-wiki-page}.png`。
+截图：`E:\dsh\home-e2e\shots\kg-{1-knowledge-search,2-knowledge-graph,3-agp-data,4-wiki-page,5-mindmap,6-meta-filter}.png`。
 
 **直连冒烟**（`scripts/live-smoke-knowledge.ts`，真实 API key 打六端点）：searchChunks 22 段
 （top 命中"主汛期限制水位 786.80m"规程原文）；subgraph(node) 15 实体/14 关系；
