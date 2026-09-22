@@ -16,6 +16,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import z from 'schemastery'
 
 /** Skill name 校验：仅小写字母/数字/单连字符，避免目录注入与歧义。 */
 const NAME_RE = /^[a-z][a-z0-9-]{1,40}$/
@@ -230,8 +231,11 @@ export const name = 'askdata-skills'
 /** 宿主服务的 skills 注册表 + askdata 服务面（供反向引用）；tools 服务由 askdata-tools 行提供。 */
 export const inject = ['skills', 'askdata']
 
-/** 本行无自有配置。 */
-export const Config: unknown = {}
+/** 本行无自有配置；rc.2 cordis 的 resolveConfig 会对导出的 Config 读
+ * `~standard.validate`，普通空对象会在挂载时报
+ * "Cannot read properties of undefined (reading 'validate')"，
+ * 因此与 tools.ts 同款用真 schema（空对象 schema）。 */
+export const Config = z.object({})
 
 /** 注入到 Context 的 skills 接口（与 @deepseek-ai/dsh-skill 的 SkillRegistry 形状对齐）。 */
 interface SkillsService {
