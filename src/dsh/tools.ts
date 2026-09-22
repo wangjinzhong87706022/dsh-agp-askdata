@@ -1,6 +1,6 @@
 /**
- * askdata 工具行（`dsh-agp-askdata/tools`）：把服务工具面（P0 五 + P1 六，共 11）
- * 注册进 DSH 工具注册表。
+ * askdata 工具行（`dsh-agp-askdata/tools`）：把服务工具面（P0 五 + P1 六 + subagent 一
+ * + 知识面三，共 15）注册进 DSH 工具注册表。
  *
  * 本行只消费宿主服务（`tools` 注册表 + 宿主行提供的 `askdata` 服务面），
  * 满足 preset 守卫（preset 行只消费），由 `preset/askdata/agent.cordis.yml`

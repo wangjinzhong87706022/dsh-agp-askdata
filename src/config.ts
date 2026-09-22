@@ -107,6 +107,27 @@ export interface AuditConfig {
   orgId: string
 }
 
+/**
+ * RAGFlow 知识面配置（graph / wiki / 原文检索，与 ragflow-import 工具链同源）。
+ *
+ * 知识面是问数的第二数据源：TSDB 给数值，RAGFlow 给依据（规程原文、实体关系、
+ * 百科页面）。全部经 HTTP 只读检索端点访问，不触碰 SQL 取数面。
+ */
+export interface KnowledgeConfig {
+  /** RAGFlow 实例基址（不含 /api/v1；客户端自动拼接）。 */
+  ragflowBaseUrl: string
+  /** API Key（Bearer）。进程内使用，不落盘、不进日志；留空时回退环境变量 RAGFLOW_API_KEY。 */
+  ragflowApiKey: string
+  /** 检索目标数据集 id 列表（空 = 知识工具不可用，调用期给出明确提示）。 */
+  datasetIds: string[]
+  /** 单次知识调用超时（毫秒）。 */
+  timeoutMs: number
+  /** knowledge_search 默认返回片段数。 */
+  maxChunks: number
+  /** knowledge_graph 默认实体预算（服务端 top_n 上限 1024）。 */
+  maxGraphEntities: number
+}
+
 /** 插件完整配置。 */
 export interface AskdataConfig {
   connection: StarRocksConnection
@@ -118,6 +139,7 @@ export interface AskdataConfig {
   system: SystemLimits
   security: SecurityConfig
   audit: AuditConfig
+  knowledge: KnowledgeConfig
 }
 
 /** 合法 SQL 标识符（表/列名），防御表名配置被注入。 */
@@ -125,6 +147,18 @@ const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 /** 会话时区只接受 ±HH:MM（StarRocks 字面量换算与 mysql CLI init-command 都依赖该形态）。 */
 const TIME_ZONE_RE = /^[+-]\d{2}:\d{2}$/
+
+/** RAGFlow 数据集 id 形态（线上为 24 位 hex；下界 3 防空值，禁特殊字符防 URL 路径注入）。 */
+const DATASET_ID_RE = /^[0-9a-zA-Z-]{3,64}$/
+
+/** RAGFlow 基址只允许 http(s)，且不含路径后缀（/api/v1 由客户端拼接）。 */
+function normalizeRagflowBaseUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (!/^https?:\/\/[^\s]+$/.test(trimmed)) {
+    throw new Error(`配置错误：knowledge.ragflowBaseUrl 必须是 http(s) 地址，收到: ${value}`)
+  }
+  return trimmed
+}
 
 function assertIdentifier(value: string, label: string): void {
   if (!IDENTIFIER_RE.test(value)) {
@@ -205,6 +239,16 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     appId: 'dsh-agp-askdata',
     orgId: '',
   },
+  // 知识面默认值：基址指向常规 RAGFlow 部署形态（具体实例由部署配置覆盖）；
+  // datasetIds 默认留空——知识工具在未配置时调用期明确报错，不静默失效。
+  knowledge: {
+    ragflowBaseUrl: 'https://labragf.openagp.top:9080',
+    ragflowApiKey: '',
+    datasetIds: [] as string[],
+    timeoutMs: 20_000,
+    maxChunks: 8,
+    maxGraphEntities: 60,
+  },
 }
 
 /**
@@ -221,6 +265,7 @@ export function resolveConfig(input: {
   system?: Partial<SystemLimits>
   security?: Partial<SecurityConfig>
   audit?: Partial<AuditConfig>
+  knowledge?: Partial<KnowledgeConfig>
 }): AskdataConfig {
   const tables = { ...DEFAULT_CONFIG.tables, ...input.tables }
   const system = { ...DEFAULT_CONFIG.system, ...input.system }
@@ -265,6 +310,8 @@ export function resolveConfig(input: {
     throw new Error('配置错误：query.tsdbChannel=rest 时必须配置 query.rest.baseUrl（TSDB HTTP 网关地址）')
   }
 
+  const knowledge = resolveKnowledgeConfig(input.knowledge)
+
   return {
     connection: { ...input.connection, driver },
     mysqlConnection,
@@ -274,5 +321,34 @@ export function resolveConfig(input: {
     system,
     security,
     audit,
+    knowledge,
+  }
+}
+
+/**
+ * 知识面配置解析：基址归一化 + 数据集 id 形态校验 + 环境变量凭据回退。
+ *
+ * 凭据优先级：显式配置 > 环境变量 RAGFLOW_API_KEY。两者都空时保留空串——
+ * 知识工具调用期报明确错误（与 TSDB 面"未配置mysqlConnection"同一模式），
+ * 不阻断取数面启动。
+ */
+export function resolveKnowledgeConfig(input?: Partial<KnowledgeConfig>): KnowledgeConfig {
+  const merged = { ...DEFAULT_CONFIG.knowledge, ...input }
+  const apiKey = merged.ragflowApiKey.trim() !== ''
+    ? merged.ragflowApiKey.trim()
+    : (process.env.RAGFLOW_API_KEY ?? '').trim()
+  for (const id of merged.datasetIds) {
+    if (!DATASET_ID_RE.test(id)) {
+      throw new Error(`配置错误：knowledge.datasetIds 含非法数据集 id: ${id}`)
+    }
+  }
+  const timeoutMs = Math.max(1000, Math.trunc(merged.timeoutMs))
+  return {
+    ragflowBaseUrl: normalizeRagflowBaseUrl(merged.ragflowBaseUrl),
+    ragflowApiKey: apiKey,
+    datasetIds: [...merged.datasetIds],
+    timeoutMs,
+    maxChunks: Math.min(50, Math.max(1, Math.trunc(merged.maxChunks))),
+    maxGraphEntities: Math.min(1024, Math.max(1, Math.trunc(merged.maxGraphEntities))),
   }
 }

@@ -1,6 +1,6 @@
 /**
  * 服务装配级测试：白名单闸门在执行器咽喉点收口（调用点遗漏也无法绕过）、
- * 工具面完整性（12 工具）、MySQL 业务库未配置的运行期守卫。
+ * 工具面完整性（15 工具）、MySQL 业务库未配置的运行期守卫。
  * @module
  */
 
@@ -15,7 +15,7 @@ function service() {
 }
 
 describe('服务装配', () => {
-  it('暴露全部 12 个工具（P0 五 + P1 六 + subagent 一）', () => {
+  it('暴露全部 15 个工具（P0 五 + P1 六 + subagent 一 + 知识面三）', () => {
     expect(service().tools.map((t) => t.name)).toEqual([
       'lookup_tag',
       'estimate_count',
@@ -29,6 +29,9 @@ describe('服务装配', () => {
       'query_alarm',
       'query_alarm_config',
       'askdata_deep_analysis',
+      'knowledge_graph',
+      'knowledge_search',
+      'knowledge_wiki_page',
     ])
   })
 

@@ -9,6 +9,7 @@
 
 import type { AskdataConfig } from '../src/config.ts'
 import type { QueryOutput } from '../src/clients/starrocks.ts'
+import type { RagflowClient } from '../src/clients/ragflow.ts'
 import type { ResultField, ToolResult } from '../src/result.ts'
 import { fail, ok } from '../src/result.ts'
 import { assertSafeToExecute } from '../src/sql/whitelist.ts'
@@ -29,6 +30,11 @@ export interface ToolContext {
   executor: SqlExecutor
   /** MySQL 执行器（P1 元数据/告警工具用）。 */
   mysqlExecutor: SqlExecutor
+  /**
+   * RAGFlow 知识面客户端（knowledge_search / knowledge_graph / knowledge_wiki_page 用）。
+   * 未装配（知识面关闭）时为 undefined，工具调用期给出明确提示。
+   */
+  knowledge?: RagflowClient
   /** 宿主取消信号（模型中断工具调用）；执行层必须尽快终止查询。 */
   signal?: AbortSignal
   /** 哈希链上一条 result_hash；首条为空串。由宿主跨调用维护。 */
@@ -132,13 +138,14 @@ export async function runSqlTool(
 }
 
 /** 构建审计行并回调宿主；成功落行后把 auditId 回填进 ToolResult。 */
-function applyAudit(
+export function applyAudit(
   tool: { name: string; layer: ToolLayer },
   args: Record<string, unknown>,
   ctx: ToolContext,
   sql: string,
   result: ToolResult,
   started: number,
+  apiUrl?: string,
 ): void {
   if (!ctx.config.audit.enabled || !ctx.onAudit) return
   try {
@@ -148,6 +155,7 @@ function applyAudit(
       orgId: ctx.config.audit.orgId,
       question: JSON.stringify(args),
       sqlText: sql,
+      ...(apiUrl !== undefined ? { apiUrl } : {}),
       apiParams: args,
       rowCount: result.rowCount,
       executionMs: Date.now() - started,

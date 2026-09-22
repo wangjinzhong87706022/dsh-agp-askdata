@@ -35,6 +35,7 @@ import { queryAlarmTool } from './query-alarm.ts'
 import { queryAlarmConfigTool } from './query-alarm-config.ts'
 import { lookupModelTool } from './lookup-model.ts'
 import { lookupTagTool } from './lookup-tag.ts'
+import { knowledgeSearchTool } from './knowledge-search.ts'
 
 /** 单步执行结果（流水线 trace 元素）。 */
 interface StepResult {
@@ -85,72 +86,99 @@ async function runStep(
   }
 }
 
-/** 把问句分类到固定流水线（关键字保守启发式，模糊命中走默认 lookup_object）。 */
-function classify(question: string): {
+/** 把问句分类到固定流水线（关键字保守启发式，模糊命中走默认 lookup_object）。
+ *
+ * `knowledgeAvailable=false` 时（知识面未装配）知识分支整体关闭，问句按原有
+ * 取数面规则分类——融合是增强不是依赖。 */
+function classify(question: string, knowledgeAvailable = true): {
   tools: AskdataTool[]
   baseArgs: () => Record<string, unknown>
   needDevice: boolean
   needTag: boolean
   /** 宽时间窗默认（7 天），与"最近告警"等场景对齐。 */
   defaultRangeDays: number
+  /** 纯知识问题（规程/依据/标准/案例）：只走 knowledge_search 取证，不碰取数面。 */
+  knowledgeOnly: boolean
+  /** 取数问题但需要资料佐证（"汛限水位是多少"类）：知识取证先行，取数照常。 */
+  knowledgeFirst: boolean
 } {
   const q = question
+  const knowledgeHit = knowledgeAvailable && /规程|预案|依据|标准|规范|条例|办法|制度|洪水过程|历史洪水|案例|百科|资料|手册/.test(q)
+  const realtimeHit = /(当前|现在|最新|实时|趋势|曲线|时序|告警|报警|故障)/.test(q)
+  // 纯知识问题：只取证不取数；否则知识取证作为取数流水线的第一步
+  const knowledgeOnly = knowledgeHit && !realtimeHit
+  const knowledgeFirst = knowledgeHit && !knowledgeOnly
+  const route = (plan: Omit<ReturnType<typeof classify>, 'knowledgeOnly' | 'knowledgeFirst'>) => ({
+    ...plan,
+    knowledgeOnly,
+    knowledgeFirst,
+  })
+
+  if (knowledgeOnly) {
+    return route({
+      tools: [knowledgeSearchTool],
+      baseArgs: () => ({}),
+      needDevice: false,
+      needTag: false,
+      defaultRangeDays: 0,
+    })
+  }
   if (/告警配置|alarm.?config|alert.?rule/i.test(q)) {
     const m = /wt_iot_[a-z0-9_]+/i.exec(q)
-    return {
+    return route({
       tools: [queryAlarmConfigTool],
       baseArgs: () => (m ? { cus_class_path: m[0] } : {}),
       needDevice: false,
       needTag: false,
       defaultRangeDays: 7,
-    }
+    })
   }
   if (/告警|alarm|报警|故障|异常/.test(q)) {
-    return {
+    return route({
       tools: [queryAlarmTool],
       baseArgs: () => ({}),
       needDevice: false,
       needTag: false,
       defaultRangeDays: 7,
-    }
+    })
   }
   if (/最新|当前|现在/.test(q)) {
-    return {
+    return route({
       tools: [latestValueTool],
       baseArgs: () => ({}),
       needDevice: true,
       needTag: true,
       defaultRangeDays: 1,
-    }
+    })
   }
   if (/趋势|波形|曲线|时序|小时|分钟/.test(q)) {
-    return {
+    return route({
       tools: [timeSeriesTool],
       baseArgs: () => ({ bucket: '1h', limit: 48 }),
       needDevice: true,
       needTag: true,
       defaultRangeDays: 1,
-    }
+    })
   }
   if (/日均|月均|累计|总[量发]|平均值|均值|avg/i.test(q)) {
-    return {
+    return route({
       tools: [aggregateTool],
       baseArgs: () => ({ func: 'AVG', group_by: 'none', limit: 100 }),
       needDevice: true,
       needTag: true,
       defaultRangeDays: 30,
-    }
+    })
   }
   if (/有哪些.*模型|设备类型|型号/.test(q)) {
-    return { tools: [lookupModelTool], baseArgs: () => ({}), needDevice: false, needTag: false, defaultRangeDays: 0 }
+    return route({ tools: [lookupModelTool], baseArgs: () => ({}), needDevice: false, needTag: false, defaultRangeDays: 0 })
   }
-  return {
+  return route({
     tools: [lookupTagTool],
     baseArgs: () => ({ keyword: q }),
     needDevice: false,
     needTag: false,
     defaultRangeDays: 0,
-  }
+  })
 }
 
 /** 抽取问题里像设备中文名的片段（2-20 个中文字符）。 */
@@ -194,7 +222,7 @@ const TRACE_FIELDS: ResultField[] = [
 export const askdataDeepAnalysisTool: AskdataTool = {
   name: 'askdata_deep_analysis',
   description:
-    '把自然语言问数交给"子智能体"处理：内部按关键词自动选择并串行执行 askdata 工具链（解析→护栏→取数），返回带溯源的完整回答。一次调用相当于 1-4 次单步工具的合成结果。',
+    '把自然语言问数交给"子智能体"处理：内部按关键词自动选择并串行执行 askdata 工具链（知识取证→解析→护栏→取数），返回带溯源的完整回答。一次调用相当于 1-5 次单步工具的合成结果。',
   layer: 'base_business',
   inputSchema: {
     type: 'object',
@@ -215,8 +243,15 @@ export const askdataDeepAnalysisTool: AskdataTool = {
       })
     }
 
-    const plan = classify(question)
+    const plan = classify(question, ctx.knowledge !== undefined)
     const steps: StepResult[] = []
+
+    // 0. 知识取证先行（knowledgeFirst：取数问题需要资料佐证时；知识面未装配则跳过）。
+    //    纯知识问题（knowledgeOnly）不走这里——分类已把主步骤设为 knowledge_search。
+    if (plan.knowledgeFirst && ctx.knowledge) {
+      const { step } = await runStep(knowledgeSearchTool, { query: question }, ctx, steps.length)
+      steps.push(step)
+    }
 
     // 1. 解析设备（需要时）：采用 lookup_object 精确命中的 node_name 传给后续
     //    resolve_tag，而非问句正则提取的原始片段（模糊片段可能残缺导致解析链断裂）。
@@ -259,6 +294,10 @@ export const askdataDeepAnalysisTool: AskdataTool = {
     // 3. 执行主取数
     const baseArgs = plan.baseArgs()
     let finalArgs: Record<string, unknown> = { ...baseArgs }
+    if (plan.tools[0] === knowledgeSearchTool) {
+      // 纯知识问题：主步骤就是取证，query 用原问句
+      finalArgs.query = question
+    }
     if (tagName) {
       // latest_value 走 tag_names，其余走 tag_filter + 时间窗
       if (plan.tools[0] === latestValueTool) {

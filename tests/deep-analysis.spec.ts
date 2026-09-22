@@ -42,9 +42,9 @@ function ctx(c = cfg()): ToolContext {
 }
 
 describe('askdata_deep_analysis（subagent-style 工具）', () => {
-  it('已在 tools 索引中、且总工具数 12（P0 5 + P1 6 + subagent 1）', () => {
+  it('已在 tools 索引中、且总工具数 15（P0 5 + P1 6 + subagent 1 + 知识面 3）', () => {
     expect(allTools.find((t) => t.name === 'askdata_deep_analysis')).toBeTruthy()
-    expect(allTools).toHaveLength(12)
+    expect(allTools).toHaveLength(15)
   })
 
   it('关键问题分支：日均 → aggregate（cube 路由）', async () => {

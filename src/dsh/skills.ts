@@ -1,7 +1,7 @@
 /**
  * askdata skill 行（`dsh-agp-askdata/skills`）：
- * 把 12 个工具的使用手册按"问数工作流"聚合为 4 个可召回的 skill，
- * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 12 个工具的 schema。
+ * 把 15 个工具的使用手册按"问数工作流"聚合为 4 个可召回的 skill，
+ * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 15 个工具的 schema。
  *
  * 设计：
  * - 聚合而非一对一：一个 skill = 一类问题的工作流（不是单个工具的说明书），符合
@@ -124,12 +124,14 @@ Y = 年聚合（1Y 走 WT_CUBE）
   {
     name: 'askdata-query-pattern',
     description: '典型问数工作流：从自然语言到工具调用的标准 5 步模板。',
-    whenToUse: '面对一个新查询不知道先调哪个工具、不知道参数怎么填、需要把 12 个工具串成可复用流水线时调用。',
+    whenToUse: '面对一个新查询不知道先调哪个工具、不知道参数怎么填、需要把 15 个工具串成可复用流水线时调用。',
     content: `# 问数工作流标准模板
 
 ## 1. 五步问数流程
 
 \`\`\`
+[0] knowledge_graph / knowledge_search → 可选，先定位标准实体名/取证规程依据
+    ↓
 [1] lookup_model          → 可选，了解有哪些设备模型
     ↓
 [2] lookup_object         → 把用户的中文设备名解析成 deviceId + class__path
@@ -151,6 +153,9 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | "今天有哪些告警" | query_alarm(当天起) |
 | "哪些设备有这类告警配置" | query_alarm_config(cus_class_path=设备类路径) |
 | "X 类设备型号清单" | lookup_model(app_id 过滤) |
+| "汛限水位/防洪标准是多少，依据是什么" | knowledge_search 取证 → 需要数值再走取数面 |
+| "某工程/机构和哪些对象相关" | knowledge_graph(entity=名称) 展开一跳关系 |
+| "某实体的完整背景" | knowledge_wiki_page(slug 或关键词) 取百科页面 |
 
 ## 3. 工具输入规约
 
@@ -163,6 +168,7 @@ Y = 年聚合（1Y 走 WT_CUBE）
 - LLM 不能直接拼裸 SQL；任何 SQL 都被闸门拦截。
 - 所有取数走 askdata 工具，不接受"我自己写 SQL"的请求。
 - 工具错误码被设计成可恢复：超时→换粒度、不存在→换查询、降级→查元数据。
+- 知识面（knowledge_*）只读检索 RAGFlow：结论必须来自返回片段并标注出处；检索不到就明说资料不足，不得编造。
 `,
   },
   {
@@ -197,6 +203,10 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | \`system.timeZone\` | \`+08:00\` | 时间字面量偏移换算 | 仅接受 ±HH:MM |
 | \`security.tableWhitelist\` | WT_TAG/WT_DATA/WT_CUBE/WT_DEVICE | 基础库白名单 | 加新表时追加 |
 | \`security.mysqlTableWhitelist\` | 7 个 wisetao_meta.* + bole.* | MySQL 白名单 | 跨库新表时追加 |
+| \`knowledge.ragflowBaseUrl\` | https://labragf.openagp.top:9080 | RAGFlow 实例基址（不含 /api/v1） | 换实例时改 |
+| \`knowledge.ragflowApiKey\` | 空（回退环境变量 RAGFLOW_API_KEY） | 知识面 Bearer 凭据 | 生产必须配 |
+| \`knowledge.datasetIds\` | 空（知识工具不可用） | 知识检索目标数据集 | 启用知识面必填 |
+| \`knowledge.maxChunks\` / \`knowledge.maxGraphEntities\` | 8 / 60 | 知识面返回量预算 | 上下文吃紧时调小 |
 | \`audit.enabled\` | \`false\` | 审计哈希链启用 | 上线时开 |
 
 ## 3. 安全红线

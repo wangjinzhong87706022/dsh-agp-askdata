@@ -1,13 +1,16 @@
 # The dsh-agp-askdata bundle patch: activates the plugin as a profile layer.
 #
 # P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
-# tools (12 in total, incl. the subagent-style askdata_deep_analysis). The
-# `askdata` row mounts the plugin service (config,
+# tools; P2 adds the RAGFlow knowledge surface (graph / wiki / chunk retrieval,
+# 3 tools) — 15 tools in total, incl. the subagent-style askdata_deep_analysis.
+# The `askdata` row mounts the plugin service (config,
 # clients, validation gate, audit chain). The `askdata-routes` web row and the
 # TSDB HTTP gateway tools join in P2.
 #
 # NOTE: the connection values below are DEV-ONLY (内网联调环境 root 空密码)。
 # 生产部署必须改为只读账号；凭据不落盘、不进日志（AGENTS.md 红线）。
+# RAGFlow API Key 同样不落盘：knowledge.ragflowApiKey 留空，运行时经环境变量
+# RAGFLOW_API_KEY 注入（resolveKnowledgeConfig 回退链）。
 - insert:
     - id: askdata
       name: 'dsh-agp-askdata'
@@ -25,3 +28,8 @@
           user: 'root'
           password: 'Aa123456.'
           database: 'wisetao_meta'
+        knowledge:
+          ragflowBaseUrl: 'https://labragf.openagp.top:9080'
+          datasetIds:
+            - 'fda7a510a87c11f1998b3dc126099a8d'  # 规程与预案（graph/wiki 已编译，436 页）
+            - 'fdfee2e4a87c11f1998b3dc126099a8d'  # 洪水资料

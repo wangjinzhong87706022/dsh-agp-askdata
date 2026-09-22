@@ -692,3 +692,64 @@ ORDER BY alarm_time DESC LIMIT 5
 | 模型自身需要时（自动） | skill 目录消息自动注入 |
 | 上线后频繁跨多个设备的批量问数 | **P2 subagent**（continuable）|
 
+
+## 18. RAGFlow 知识面（P2，2026-09-22：graph + wiki 融合）
+
+> 来源：`E:\git\ragflow-import` 项目（桃曲坡水库知识库 RAGFlow 导入工具链）的 graph 与 wiki 能力分析。
+> 结论：两能力的服务端同构 API 已在线上实例开放（v0.27.x 实证），融合 = 在 askdata 内新增
+> RAGFlow 知识面（3 工具），与取数面互补，不触碰 SQL 取数链路与只读红线。
+
+### 18.1 ragflow-import 的 graph / wiki 功能分析（本地构建侧）
+
+| 能力 | 核心模块 | 产物 | 服务端同构面 |
+|---|---|---|---|
+| graph（经典 GraphRAG light） | `src/graphrag_port/`（extractor / light_extractor / graph_prompt / llm_adapter）+ `build_graph_local.py` | `knowledge_graph_<ds>.json`（`{graph:{nodes:[{id,entity_type,description}],edges:[{source,target,weight,description,keywords,source_id}]},mind_map}`）+ vis-network HTML | `GET /datasets/{id}/artifacts/graph`、`GET /datasets/{id}/artifacts/structure?kind=graph` |
+| wiki（百科页面 + 互链） | `src/wiki_port/`（scenario_config / page_synthesizer / crosslinker）+ `build_wiki_local.py` | `wiki_<场景>.json`（entities/relations/pages/link_graph/reverse_index）+ 双 Tab HTML 查看器；三场景：regulation（法规页+事项→条款反查）/ topology（河网拓扑 canvas）/ case（洪水案例页+时间线） | `GET /datasets/{id}/artifacts`（清单）、`GET /datasets/{id}/artifacts/{page_type}/{slug}`（页面全文） |
+
+本地构建链（拉 chunks → LLM 抽取 → 合并消歧 → 页面合成 → 互链）与 ragflow-import 的
+`DomainKnowledgeDict` 别名归一，是服务端 wiki/graph 编译管线的同源能力；服务端已编译的
+产物优先直接消费（零 LLM 成本），本地工具链留作离线重建手段。
+
+### 18.2 融合设计（为什么这样融）
+
+问数的两个数据源各答一半问题：**TSDB 回答"数值是多少"，RAGFlow 知识库回答"依据是什么"**
+（规程条款、防洪标准、洪水过程、工程参数口径）。融合点三处：
+
+1. **知识面工具（新增 3 个，tools/knowledge-*.ts）**——不过 SQL 闸门（载体是 HTTP 只读检索），
+   但同样过 `runKnowledgeTool` 管线（ok/fail + 审计落行，`sqlText`/`apiUrl` 记 API URL）：
+   - `knowledge_search`：`POST /datasets/search` 原文片段取证（契约与 dsh-plugins/lingzhi-knowledge-tool 的 searchDatasets 一致：HTTP 200 + code≠0 = 业务失败；命中正文字段 content_with_weight）；
+   - `knowledge_graph`：`GET /datasets/{id}/artifacts/graph` 实体关系子图（node 中心扩展一跳 / keywords 概览；多数据集合并 + 悬空边过滤）；
+   - `knowledge_wiki_page`：`GET /datasets/{id}/artifacts` 清单 + `/{page_type}/{slug}` 页面全文（content_md_rendered + outlinks + related_kb_pages）。
+2. **resolve_tag 别名归一化（tools/resolve-tag.ts）**——设备名未命中 `wt_elm_equipment` 时，
+   查 `knowledge_graph` 拿标准实体名与别名重试一次（服务端同构的 DomainKnowledgeDict）；
+   知识面不可用/超时静默降级，不影响原 OBJECT_NOT_FOUND 错误语义。
+3. **askdata_deep_analysis 知识分支（tools/deep-analysis.ts）**——classify 增加
+   `knowledgeOnly`（纯知识问题只取证不取数）/ `knowledgeFirst`（取数问题先取证再取数）；
+   知识面未装配时分支整体关闭，问句按原取数面规则分类（融合是增强不是依赖）。
+
+红线符合性：知识面全部是 GET/POST 检索类调用（无写）；API Key 只进 Authorization 头
+（Config `.role('secret')` + 环境变量 RAGFLOW_API_KEY 回退，不落盘不进日志）；
+核心零 npm 运行时依赖（Node 22 内置 fetch + AbortSignal.any）。
+
+### 18.3 配置（knowledge 段）
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `ragflowBaseUrl` | `https://labragf.openagp.top:9080` | 实例基址（不含 /api/v1，客户端拼接） |
+| `ragflowApiKey` | 空 → 环境变量 `RAGFLOW_API_KEY` | Bearer 凭据，进程内使用 |
+| `datasetIds` | 空（知识工具调用期明确报错，取数面不受影响） | 检索目标数据集；加载期校验 id 形态（禁特殊字符，防 URL 路径注入） |
+| `timeoutMs` | 20000 | 单次知识调用超时（与调用方 signal 合并中断） |
+| `maxChunks` / `maxGraphEntities` | 8 / 60 | 返回量预算（后者服务端上限 1024） |
+
+### 18.4 验证记录（2026-09-22）
+
+- 线上 API 契约实证：`/datasets`（20 库）、`/artifacts`（规程与预案 436 页，洪水资料 0 页）、
+  `/artifacts/graph`（node 模式实体+关系；概览模式 top_n 生效）、`/artifacts/structure?kind=graph`、
+  `/artifacts/{pt}/{slug}`（content_md_rendered / outlinks / source_chunk_ids 投影）。
+- 测试：`tests/ragflow-client.spec.ts`（18 例：code≠0、投影、多数据集合并、悬空边过滤、
+  取消/超时、slug 工具函数）+ `tests/knowledge-tools.spec.ts`（11 例：三工具行为 +
+  deep_analysis 知识融合 + 未装配降级）；`tests/dsh-config.spec.ts` 补知识面装配/校验用例。
+  全套 208 例通过，`tsc --noEmit` 0 错误。
+- E2E：dsh web（DSH_HOME=E:\dsh\home-e2e，3080 端口 token 鉴权）三链路——
+  知识取证（问汛限水位依据 → knowledge_search 命中规程片段）、取数（库容/电流）、
+  图谱（实体关联）；详见 docs/RAGFLOW-REBUILD-20260922.md 的 E2E 章节。
