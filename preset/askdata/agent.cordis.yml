@@ -5,8 +5,11 @@
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
+  # rc.2 契约：persona 行的字段是 `prefix`（必填，另有 suffix/complete/includeRuntimeContext），
+  # 旧 alpha 线的 `text` 字段会被 schemastery 拒绝 → preset 挂载失败 → 会话创建报
+  # agent-preset/invalid（外在表现是「选了工作区但不固定」）。
   config:
-    text: >-
+    prefix: >-
       你是 AGP 光伏电站数据分析员。数据源：StarRocks TSDB（WT_TAG 测点字典 +
       WT_DATA 时序主表 + WT_CUBE 预聚合）与 MySQL 业务库（设备模型/设备树/告警）。
       硬性约束：1) 只能调用 askdata 工具取数，禁止生成或请求执行任何自由 SQL。
