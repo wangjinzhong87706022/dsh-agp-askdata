@@ -135,6 +135,34 @@ export const Config = z.object({
     maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph / knowledge_mindmap 默认实体/节点预算（服务端上限 1024）'),
   }).collapse().description('RAGFlow 知识面（graph/wiki/原文检索；问数的第二数据源：TSDB 给数值，知识库给依据）'),
 
+  duty: z.object({
+    project: z.string().default('').description('值班报告的工程/河段名（报告头，如"桃曲坡水库"）'),
+    outputDir: z.string().default('').description('报告产物目录；留空 = $DSH_HOME/outputs（再退 ./outputs）。报告 HTML 只写此目录'),
+    stations: z.array(z.object({
+      id: z.string().description('测站 id（报告与规则 id 引用；字母/数字/下划线/中文/连字符）'),
+      name: z.string().description('测站名称'),
+      metrics: z.array(z.object({
+        metric: z.string().description('指标键（water_level/rainfall/inflow/outflow…，站内唯一）'),
+        label: z.string().description('中文指标名（报告表格列名）'),
+        unit: z.string().description('计量单位（m/mm/m³/s…）'),
+        tagName: z.string().description('AGP 测点全名——实时值经 AGP API 拉取，不走 SQL'),
+        decimals: z.number().min(0).max(8).description('展示小数位（缺省 2）'),
+        thresholds: z.array(z.object({
+          level: z.string().description('档名（汛限/警戒/保证/校核…；等级映射见手册）'),
+          value: z.number().description('阈值量值'),
+          op: z.union([z.const('>='), z.const('>'), z.const('<='), z.const('<')]).description('判超操作符（缺省 >=）'),
+        })).description('阈值档（缺省 = 只汇总不研判）'),
+      })).description('该站指标台账（实时值 + 阈值）'),
+    })).default([])
+      .description('测站台账（值班报告的取数与研判范围；空 = 值班工具调用期提示未配置）'),
+    reporting: z.array(z.object({
+      object: z.string().description('通知对象（如"市防汛抗旱指挥部"）'),
+      channel: z.string().description('通道/方式（如"防汛专报"）'),
+      frequency: z.string().description('频次（如"超汛限期间每 2 小时一次"）'),
+    })).default([])
+      .description('报讯/通知路径（报告第 7 段；配置化，不由 LLM 生成）'),
+  }).collapse().description('防汛值班报告面（AGP API 实时值 + 规则研判 + 8 段 HTML 报告；docs/architecture.md §19）'),
+
   installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
   presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）'),
 })
@@ -189,6 +217,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
     security: config.security,
     audit: config.audit,
     knowledge: config.knowledge,
+    duty: config.duty,
   }
 }
 

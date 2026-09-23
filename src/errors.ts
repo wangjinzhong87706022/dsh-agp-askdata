@@ -18,6 +18,8 @@ export const ERROR_CODES = {
   OBJECT_NOT_FOUND: '设备/对象名未命中',
   TAG_DEFINITION_NOT_FOUND: '测点中文名未命中动态属性定义',
   TAG_NOT_REGISTERED: 'tagName 未在 wt_iot_tags 注册',
+  /** 值班报告面新增（docs/architecture.md §19）：渲染产物未过出闸校验。 */
+  REPORT_INVALID: '值班报告出闸校验未通过',
 } as const
 
 export type ErrorCode = keyof typeof ERROR_CODES
@@ -35,6 +37,7 @@ const RETRY_HINTS: Partial<Record<ErrorCode, string>> = {
   OBJECT_NOT_FOUND: '先用 lookup_object 查出正确设备名再重试',
   TAG_DEFINITION_NOT_FOUND: '先用 lookup_tag_definition 查出正确测点中文名再重试',
   TAG_NOT_REGISTERED: 'tagName 未在 wt_iot_tags 注册，检查粒度后缀或设备 id',
+  REPORT_INVALID: '检查 abstentions/数据源后重新生成，不要人工修补 HTML',
 }
 
 /** 取错误码对应的 LLM 处置提示。 */

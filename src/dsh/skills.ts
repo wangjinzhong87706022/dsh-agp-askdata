@@ -1,7 +1,7 @@
 /**
  * askdata skill 行（`dsh-agp-askdata/skills`）：
- * 把 16 个工具的使用手册按"问数工作流"聚合为 4 个可召回的 skill，
- * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 16 个工具的 schema。
+ * 把 18 个工具的使用手册按"问数工作流 + 值班报告工作流"聚合为 5 个可召回的 skill，
+ * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 18 个工具的 schema。
  *
  * 设计：
  * - 聚合而非一对一：一个 skill = 一类问题的工作流（不是单个工具的说明书），符合
@@ -33,7 +33,7 @@ export interface AskdataSkill {
   content: string
 }
 
-/** askdata 提供的 4 个 skill 聚合（顺序即目录展示顺序）。 */
+/** askdata 提供的 5 个 skill 聚合（顺序即目录展示顺序）。 */
 export const ASKDATA_SKILLS: readonly AskdataSkill[] = [
   {
     name: 'askdata-troubleshoot',
@@ -220,6 +220,54 @@ Y = 年聚合（1Y 走 WT_CUBE）
 ## 4. 验证连接
 
 启动 DSH web 后用 \`pnpm tsx scripts/e2e-p0.ts\` 跑 P0 端到端；用 \`scripts/e2e-p1.ts\` 验 P1。MySQL 通了 6/6 = 35 行模型 / 222 行测点定义 / 11619 条告警。
+`,
+  },
+  {
+    name: 'askdata-duty-report',
+    description: '防汛值班报告工作流：台账确认 → AGP API 取数 → 规则研判 → 8 段 HTML 报告生成与交付。',
+    whenToUse: '用户要"生成值班报告/防汛报告/水雨情汇报"、问 generate_duty_report 怎么传参、或报告缺测/规程引用缺失需要解释时调用。',
+    content: `# 防汛值班报告工作流手册
+
+## 1. 端到端流程（单工具编排，对照《防汛值班报告 Agent 规划清单》场景 A）
+
+\`\`\`
+[1] list_duty_stations      → 确认台账测站/指标/阈值（用户没说时段时先澄清）
+[2] knowledge_search        → 可选：先取证规程原文（片段经 citations 入参进报告，引用更准）
+[3] generate_duty_report    → 一次调用完成：AGP API 拉实时值 → 规则引擎研判 →
+                              8 段 HTML 渲染 → 出闸校验 → 落盘 outputs/
+[4] 对话回复                 → 报告文件路径 + pack_hash + 要点（命中/缺口），不贴大段 HTML
+\`\`\`
+
+## 2. generate_duty_report 入参速查
+
+| 入参 | 必填 | 说明 |
+|---|---|---|
+| shift_start / shift_end | ✅ | 值班时段（ISO8601 或 YYYY-MM-DD）；跨度受 system.maxTimeRangeDays 限制 |
+| shift_name | — | 白班/夜班；缺省按开始时间 8-20 点推断 |
+| station_ids | — | 台账测站子集；缺省全部（先 list_duty_stations 确认 id） |
+| citations | — | [{document, snippet, page?, chunk_id?}]——你在第 2 步取证到的规程片段 |
+| kb_query | — | 未传 citations 时工具自动检索规程的问句改写 |
+| notes | — | 交接事项（进第 8 段，不参与 pack_hash） |
+| title | — | 报告标题覆盖 |
+
+## 3. 数据源与红线
+
+- **实时数据只走 AGP API**（POST /tag/realtime 主路 + iotRealTimeValue 回落；鉴权三头
+  WT-APPID/WT-OPENID/WT-TOKEN，openid/token 可回退环境变量 AGP_API_OPENID/AGP_API_TOKEN）。
+  值班报告**不用 SQL 通道**；API 失败 → 报告"数据缺口"段记 abstentions，缺测不编造、不邻站填空。
+- **研判只由规则引擎产生**：阈值命中/告警等级（保证/校核→红色、警戒→橙色、汛限→黄色、
+  其余→蓝色）/调度建议全部来自 duty.stations 配置的阈值档；不要在对话里自算等级或自拟建议。
+- **边界**：报告只出研判建议、告警等级、通知对象；禁止开闸/关闸/启泵等操作令
+  （渲染后有出闸校验，命中即 REPORT_INVALID）。
+- 报告 HTML 只写入 duty.outputDir（缺省 $DSH_HOME/outputs）；对话摘要、pack_hash、
+  HTML 页脚三者同源一致。
+
+## 4. 常见问答
+
+- "报告里数值是哪来的？"→ AGP API 实时值（每个测点带 tagName 与观测时间；见第 2 段表格）。
+- "为什么没有 XX 测站？"→ 台账未配置或 station_ids 没选；list_duty_stations 核对。
+- "规程依据为什么是空的？"→ 知识面未装配（knowledge.datasetIds）或检索为空；缺口写在第 8 段。
+- "能直接给我开闸建议吗？"→ 不能；系统边界只出研判建议与通知对象，调度决策归防汛指挥机构。
 `,
   },
 ] as const

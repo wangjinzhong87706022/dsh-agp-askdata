@@ -35,6 +35,11 @@ export interface ToolContext {
    * 未装配（知识面关闭）时为 undefined，工具调用期给出明确提示。
    */
   knowledge?: RagflowClient
+  /**
+   * AGP API 调用通道（值班报告面 fetchAgpRealtime 用）；缺省全局 fetch。
+   * 测试/宿主可注入替身（与 RagflowClient 的 fetchImpl 注入同一模式）。
+   */
+  fetchImpl?: typeof fetch
   /** 宿主取消信号（模型中断工具调用）；执行层必须尽快终止查询。 */
   signal?: AbortSignal
   /** 哈希链上一条 result_hash；首条为空串。由宿主跨调用维护。 */

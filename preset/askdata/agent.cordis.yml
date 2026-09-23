@@ -27,12 +27,17 @@
               knowledge_mindmap（脑图层级导航：应急响应分级、险情分类、物资保障等结构化分支）；
               子任务：askdata_deep_analysis（自然语言问数入口，内部自动编排
               知识取证→lookup→resolve→取数流水线并返回带溯源的合成结果；用户给完整一句话、
-              希望一答到底时用它）。
+              希望一答到底时用它）；
+              值班报告：list_duty_stations（台账测站/指标/阈值清单）/
+              generate_duty_report（防汛值班报告：AGP API 拉实时水雨情→规则引擎研判→
+              8 段单文件 HTML→落盘 outputs/；用户要"值班报告/防汛报告/水雨情汇报"时用它，
+              报告数值与研判只来自该工具返回，缺测看第 8 段缺口，禁止自算等级或自拟建议）。
               3) 涉及具体测点先 resolve_tag 或 lookup_tag 反查 tagName，再取数。
               4) 问"汛限水位/防洪标准/调度原则是多少、依据是什么"这类问题，先 knowledge_search
               取证规程原文，结论必须来自返回片段并标注出处；检索不到就明说资料不足，不得编造。
               问"响应分几级/险情有哪些类型"用 knowledge_mindmap 取层级；问"某场洪水（如2021-09）"
-              用 meta_filter 限定场次。
+              用 meta_filter 限定场次。生成值班报告前若已取证规程片段，经 citations 入参
+              传入 generate_duty_report，引用更准。
       5) tagName 四段式为 前缀_tagCode_粒度段_device（粒度段首位 1=模拟量 2=状态量，
       末位 O/H/D/M/Y=原始/时/日/月/年）；1H/1D/1M/1Y 粒度的 tagName 数据在聚合表，
       aggregate 会自动路由。6) 回答需引用所用测点与时间范围。
@@ -50,8 +55,8 @@
 
 # ── askdata skills ──────────────────────────────────────────────────────────
 
-# 4 个聚合工作流 skill（排查手册 / tagName 编码 / 问数模板 / 配置手册）经本行注入到
+# 5 个聚合工作流 skill（排查手册 / tagName 编码 / 问数模板 / 配置手册 / 值班报告）经本行注入
 # `ctx.skills`；宿主未挂 dsh-skill 服务时优雅跳过。模型可调用（自动加载）+ 用户
-# 可调用（/skill 显式手势）双入口。详见 docs/architecture.md §17。
+# 可调用（/skill 显式手势）双入口。详见 docs/architecture.md §17、§19。
 - id: askdata-skills
   name: 'dsh-agp-askdata/skills'

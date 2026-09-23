@@ -2,15 +2,19 @@
 #
 # P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
 # tools; P2 adds the RAGFlow knowledge surface (graph / wiki / chunk retrieval,
-# 3 tools) — 15 tools in total, incl. the subagent-style askdata_deep_analysis.
-# The `askdata` row mounts the plugin service (config,
-# clients, validation gate, audit chain). The `askdata-routes` web row and the
-# TSDB HTTP gateway tools join in P2.
+# 4 tools) and the flood duty-report surface (list_duty_stations +
+# generate_duty_report) — 18 tools in total, incl. the subagent-style
+# askdata_deep_analysis. The `askdata` row mounts the plugin service (config,
+# clients, validation gate, audit chain).
 #
 # NOTE: the connection values below are DEV-ONLY (内网联调环境 root 空密码)。
 # 生产部署必须改为只读账号；凭据不落盘、不进日志（AGENTS.md 红线）。
 # RAGFlow API Key 同样不落盘：knowledge.ragflowApiKey 留空，运行时经环境变量
 # RAGFLOW_API_KEY 注入（resolveKnowledgeConfig 回退链）。
+# AGP API 凭据同理：query.rest.wtOpenid/wtToken 留空回退环境变量
+# AGP_API_OPENID / AGP_API_TOKEN。
+# duty.stations 是桃曲坡水库演示台账（DEV-ONLY）：tagName 为演示测点形态，
+# 阈值档取自规程库口径（主汛期汛限 786.80m 等），生产部署按工程实际替换。
 - insert:
     - id: askdata
       name: 'dsh-agp-askdata'
@@ -33,3 +37,40 @@
           datasetIds:
             - 'fda7a510a87c11f1998b3dc126099a8d'  # 规程与预案（graph/wiki 已编译，436 页）
             - 'fdfee2e4a87c11f1998b3dc126099a8d'  # 洪水资料
+        duty:
+          project: '桃曲坡水库'
+          outputDir: ''                            # 缺省 $DSH_HOME/outputs
+          stations:
+            - id: 'TQP-DAM-SW'
+              name: '桃曲坡水库坝上水位站'
+              metrics:
+                - metric: 'water_level'
+                  label: '坝上水位'
+                  unit: 'm'
+                  tagName: 'TQPSW001_1O_100620000030001'
+                  decimals: 2
+                  thresholds:
+                    - { level: '汛限', value: 786.8 }   # 主汛期限制水位（规程库口径）
+                    - { level: '警戒', value: 787.5 }
+                    - { level: '保证', value: 788.4 }
+            - id: 'TQP-RAIN'
+              name: '桃曲坡水库雨量站'
+              metrics:
+                - metric: 'rainfall'
+                  label: '时段降雨量'
+                  unit: 'mm'
+                  tagName: 'TQPRN001_1O_100620000030002'
+                  decimals: 1
+                  thresholds:
+                    - { level: '警戒雨量', value: 50 }
+            - id: 'TQP-INFLOW'
+              name: '桃曲坡水库入库水文站'
+              metrics:
+                - metric: 'inflow'
+                  label: '入库流量'
+                  unit: 'm³/s'
+                  tagName: 'TQPQF001_1O_100620000030003'
+                  decimals: 1
+          reporting:
+            - { object: '铜川市防汛抗旱指挥部', channel: '防汛专报', frequency: '超汛限期间每 2 小时一次' }
+            - { object: '桃曲坡水库灌区管理单位', channel: '值班交接', frequency: '每班次' }

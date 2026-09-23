@@ -631,7 +631,7 @@ ORDER BY alarm_time DESC LIMIT 5
 
 > DSH 提供三类扩展机制来增强插件在 Agent 中使用：tool（每次自动注入）、skill（按需加载的手册）、subagent（独立工作流）。askdata 同时使用三种机制——模型常用基础工具、用户/复杂场景用 skill 查阅手册、整句自然语言用 deep_analysis 走子 agent 流水线。
 
-### 17.1 工具层（已完成，P0 + P1 + subagent-style + 知识面共 16 个）
+### 17.1 工具层（已完成，P0 + P1 + subagent-style + 知识面 + 值班报告面共 18 个）
 
 | 层 | 工具 | 说明 |
 |---|---|---|
@@ -639,6 +639,7 @@ ORDER BY alarm_time DESC LIMIT 5
 | P1 | `lookup_model` / `lookup_object` / `lookup_tag_definition` / `resolve_tag` / `query_alarm` / `query_alarm_config` | 元数据/告警 |
 | **subagent-style** | **`askdata_deep_analysis`** | **自然语言问数入口：内部按关键词自动编排 lookup → resolve → 取数流水线并返回带溯源的合成结果** |
 | P2 知识面 | `knowledge_graph` / `knowledge_search` / `knowledge_wiki_page` / `knowledge_mindmap` | RAGFlow 知识库：实体关系子图 / 原文取证（元数据过滤+标签回显）/ 百科页面 / 脑图层级（§18） |
+| 值班报告面 | `list_duty_stations` / `generate_duty_report` | 防汛值班报告：台账投影 / AGP API 取数+规则研判+8 段 HTML 落盘（§19） |
 
 `askdata_deep_analysis`（`tools/deep-analysis.ts`）是 DSH subagent one-shot 委派的 in-process 等价物：它把"自主完成多步任务 + 给出完整结论"的子 agent 行为封装在一个工具调用里，避免调用方自己编排 N 次工具。本插件不依赖宿主 `@deepseek-ai/dsh-agents` runtime，故采用工具内 pipeline 实现。关键词分支：
 
@@ -656,9 +657,9 @@ ORDER BY alarm_time DESC LIMIT 5
 
 测试：`tests/deep-analysis.spec.ts` 9 个用例覆盖 5 类分支 + 设备精确名传递 + 失败兜底。
 
-### 17.2 Skill 层（已完成，4 个聚合手册）
+### 17.2 Skill 层（已完成，5 个聚合手册）
 
-`src/dsh/skills.ts` 通过 cordis 单独行 `dsh-agp-askdata/skills` 注入到 `ctx.skills`，4 个 skill 覆盖四类正交主题：
+`src/dsh/skills.ts` 通过 cordis 单独行 `dsh-agp-askdata/skills` 注入到 `ctx.skills`，5 个 skill 覆盖五类正交主题：
 
 | Skill 名 | 一行描述 | 何时调用 |
 |---|---|---|
@@ -666,6 +667,7 @@ ORDER BY alarm_time DESC LIMIT 5
 | `askdata-tagname` | tagName 四段式编码、粒度段、tagCode/tagIndex 解析规则 | 解释 tagName 全名、累计量 vs 瞬时量粒度选择、cubeType 一一对应 |
 | `askdata-query-pattern` | 典型问数工作流：从自然语言到工具调用的标准 5 步模板 | 新查询不知先调哪个工具、串成可复用流水线 |
 | `askdata-config` | 运行时配置（密码、连接、超时、cube 路由、REST 通道）的修改与生效路径 | 改数据库密码、切换 cube/原始表、启用 TSDB 网关、加白名单 |
+| `askdata-duty-report` | 防汛值班报告工作流（台账→AGP API→研判→8 段 HTML） | 用户要"值班报告/防汛报告"、generate_duty_report 传参、报告缺口解释（§19） |
 
 调用策略 `modelInvocable=true` + `userInvocable=true`：模型可调用（自动加载）+ 用户可调用（`/skill` 显式手势）双入口。
 
@@ -793,3 +795,63 @@ top_k 封顶、labels、meta_filter 归一/非法条件、mindmap 森林/环安�
 meta_filter 场次限定生效。dsh web E2E 10/11（六条功能链路全过；唯一未过项为 genui
 对模型某轮 dsh-ui 围栏的解析警告，客户端容错行为，与知识工具无关），
 详见 docs/RAGFLOW-REBUILD-20260922.md。
+
+## 19. 防汛值班报告面（2026-09-23）
+
+> 来源：《防汛值班报告 Agent 规划清单-20260910》（TNAGT 灵知AI 平台规划）在本仓库的
+> 落地——按本插件"工具内 pipeline + 单 Agent"模式实现规划清单的场景 A（轻量单
+> Agent 快速上线）；规划中的多 Agent 协同（S6 编排 Skill + 5 子体）属 TNAGT 平台侧
+> 能力，本仓库以 `generate_duty_report` 单工具编排等价覆盖其数据流（采集→研判→
+> 引用→渲染→校验→交付），与 deep-analysis 的 subagent-style 先例（§17.1）同构。
+
+### 19.1 能力与边界
+
+| 项 | 内容 |
+|---|---|
+| 工具 | `list_duty_stations`（台账投影，澄清槽位）+ `generate_duty_report`（编排入口），工具面 16 → **18** |
+| 数据源 | **AGP API 实时值（不走 SQL）**：POST `{rest.baseUrl}/tag/realtime` 主路（MetaTagValueController 官方形态）→ 失败回落 GET `/iotRealTimeValue`；鉴权三头 WT-APPID/WT-OPENID/WT-TOKEN，openid/token 留空回退环境变量 `AGP_API_OPENID`/`AGP_API_TOKEN` |
+| 规则研判 | 阈值判超引擎（`src/duty/rules.ts`）：duty.stations 配置的阈值档 → 命中/等级/建议全由确定性代码产生，**LLM 不自算等级**；等级映射固定（保证/校核→红、警戒→橙、汛限→黄、其余→蓝） |
+| 规程引用 | citations 入参（LLM 先 knowledge_search 取证）优先；缺省工具内自动检索一次（top3）；失败/未装配记缺口不阻断 |
+| 产物 | 8 段单文件 HTML（报告头/测站汇总/阈值对照/预警研判/建议/规程依据/通知报讯/缺口交接）：内联 CSS、零外链（离线可开/打印/归档）、内嵌 `<script id="duty-fact-pack">` 机器可读事实包；落盘 `duty.outputDir`（缺省 `$DSH_HOME/outputs`） |
+| 事实包 | `src/duty/fact-pack.ts`：hard（telemetry/thresholds/ruleHits/constraints/advice/citations/reporting）参与 pack_hash（SHA-256 前 16 hex，键排序 canonical JSON）；soft（claims）与 shell（标题/编制时间/交接 notes）不参与——对话摘要、HTML 页脚、内嵌包三者同源 |
+| 出闸校验 | `validateDutyReportHtml`：8 段齐全、页脚/内嵌包 hash 一致、advice 全量（禁压缩）、**无操作令**（开闸/关闸/启泵等命令式措辞，禁则声明块与内嵌 JSON 豁免）→ 失败抛新错误码 `REPORT_INVALID` |
+| 缺测语义 | AGP API 失败/测点无值 → abstentions[]（`DATA_MISSING`/`KNOWLEDGE_UNAVAILABLE` + 规范错误码），报告照常产出且第 8 段列明，**缺测不编造、不邻站填空、不回落 SQL** |
+| 红线符合性 | 只读红线约束 SQL 写语句；报告 HTML 文件是工具交付物本身（规划清单明确"写入沙盒文件"），只写 duty.outputDir 解析目录，不触碰数据库 |
+
+### 19.2 配置（duty 段）
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `duty.project` | 空 | 工程/河段名（报告头） |
+| `duty.outputDir` | 空 | 产物目录；空 = `$DSH_HOME/outputs` 再退 `./outputs` |
+| `duty.stations[]` | 空（面不可用，调用期明确提示） | 测站台账：id/name/metrics[]；metric = {metric 键, label, unit, **tagName（AGP 测点全名）**, decimals, thresholds[]}；threshold = {level, value, op?（缺省 >=）}，无 thresholds = 只汇总不研判 |
+| `duty.reporting[]` | 空 | 报讯路径（第 7 段）：{object, channel?, frequency?}，配置化不由 LLM 生成 |
+
+台账/阈值是工程专属部署事实，不内嵌默认值；演示台账（桃曲坡 3 站）在 `cordis.patch.yml`
+（DEV-ONLY 标注）。DSH 配置页同步渲染 duty 分组（`src/dsh/plugin.ts`）。
+
+### 19.3 工具入参速查（generate_duty_report）
+
+`shift_start`/`shift_end`（必填，ISO8601 或 YYYY-MM-DD，过 validateTimeRange 护栏）、
+`shift_name`（缺省按 8-20 点推断白/夜班）、`station_ids`（台账子集）、`title`、`notes`
+（交接事项，shell 层）、`citations[]`（{document, snippet, page?, chunk_id?}）、`kb_query`。
+
+### 19.4 测试与验证记录（2026-09-23）
+
+- 单测 225 → **262 例全绿**（新增 37：规则研判/等级映射/多档取最高/缺测语义/低于型阈值、
+  pack_hash 确定性与 hard/soft 分层、渲染 8 段/转义/内嵌包还原/出闸校验三反面、
+  工具行为（mock fetch：POST 主路/GET 回落/全缺口渲染/citations 优先/环境变量凭据回退/
+  台账与时段校验）、duty 配置装配与非法台账报错）；`tsc --noEmit` 0 错误。
+- 工具级 E2E（`scripts/e2e-duty-report.ts` + `scripts/mock-agp-api.mjs`，mock 网关 8410）：
+  **14/14 通过**——台账投影、AGP API 取数（executor 零调用）、超警戒命中、8 段落盘、
+  离线单文件、内嵌包重渲染幂等。
+- **Playwright DSH web 端到端 15/15 通过**（`E:\git\deepseek-harness\apps\web\tests\e2e-duty-report.mjs`，
+  web 3080 + `--patch duty-e2e.patch.yml` 把 AGP API 指向 mock）：对话发起 →
+  模型四步流程（list_duty_stations → knowledge_search 取证 → generate_duty_report →
+  出闸校验说明）→ 产物落盘 `$DSH_HOME/outputs` → 对话 pack_hash 与 HTML 页脚一致 →
+  file:// 离线打开渲染（截图 `E:\dsh\home-e2e\shots\duty-*.png`）。规程引用命中真实
+  RAGFlow 规程库（《03-汛期调度运用计划.pdf》主汛期限制水位 786.80m 原文）。
+- 环境事实：E2E profile 中 `@changfenhuang/dsh-genui` 包损坏（lib/ 仅剩 assets、
+  cordis.patch.yml 缺失，manifest 声明强制 → 启动失败），已从 home-e2e web profile 的
+  bundles 摘除（值班报告链路不依赖 dsh-ui）；`dsh web` 子命令不接受 `--patch`，须用
+  `dsh --profile web --patch <file>` 启动器形态。

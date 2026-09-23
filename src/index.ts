@@ -10,7 +10,7 @@
  * @module
  */
 
-import { resolveConfig, type AskdataConfig, type StarRocksConnection, type MysqlConnection, type QueryConfig } from './config.ts'
+import { resolveConfig, type AskdataConfig, type StarRocksConnection, type MysqlConnection, type QueryConfig, type DutyConfig } from './config.ts'
 import { executeQuery } from './clients/starrocks.ts'
 import { executeQueryViaMysql2 } from './clients/starrocks-mysql2.ts'
 import { executeQueryViaMysql } from './clients/mysql-mysql2.ts'
@@ -25,7 +25,7 @@ import { askdataError } from './errors.ts'
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（P0 五工具 + P1 六工具 + subagent 一工具 + 知识面四工具，共 16 个）。 */
+  /** 全部工具面（P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告面二，共 18 个）。 */
   tools: AskdataTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
   createContext(options?: {
@@ -61,6 +61,7 @@ export function createAskdataService(input: {
   security?: Partial<AskdataConfig['security']>
   audit?: Partial<AskdataConfig['audit']>
   knowledge?: Partial<AskdataConfig['knowledge']>
+  duty?: Partial<DutyConfig>
 }): AskdataService {
   const config = resolveConfig(input)
   // 知识面客户端：datasetIds 为空时不装配（知识工具调用期明确报错），

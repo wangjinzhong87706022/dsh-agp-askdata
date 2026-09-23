@@ -16,8 +16,8 @@ function defaultConfig(): ReturnType<typeof Config> {
 describe('配置页默认值可装配', () => {
   it('schema 默认值经 toRuntimeConfig → createAskdataService 全程通过', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    // P0 五 + P1 六 + subagent 一 + 知识面四 = 16
-    expect(service.tools).toHaveLength(16)
+    // P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告二 = 18
+    expect(service.tools).toHaveLength(18)
     expect(service.config.query.aggregateTable).toBe('WT_CUBE')
     expect(service.config.query.cubeTypeMap[7]).toBe(DEFAULT_CUBE_TYPE_MAP[7])
     expect(service.config.query.granularityMap['1D']).toBe(2)
@@ -38,6 +38,57 @@ describe('配置页默认值可装配', () => {
     })
     expect(service.config.knowledge.datasetIds).toHaveLength(1)
     expect(service.createContext().knowledge).toBeDefined()
+  })
+
+  it('值班报告面：duty 台账经 schema → toRuntimeConfig 全程通过，空台账为合法部署', () => {
+    const base = defaultConfig()
+    // 空台账（schema 默认）合法：值班工具调用期提示，不影响装配
+    expect(base.duty.stations).toEqual([])
+
+    // 演示台账（cordis.patch.yml 同构）经 schema 物化后可装配
+    const configured = Config({
+      connection: { host: 'fe.example.com', database: 'WT_DB' },
+      duty: {
+        project: '桃曲坡水库',
+        outputDir: '',
+        stations: [{
+          id: 'TQP-DAM-SW',
+          name: '桃曲坡水库坝上水位站',
+          metrics: [{
+            metric: 'water_level', label: '坝上水位', unit: 'm', tagName: 'TQPSW001_1O_1', decimals: 2,
+            thresholds: [{ level: '汛限', value: 786.8 }],
+          }],
+        }],
+        reporting: [{ object: '市防指', channel: '专报', frequency: '每 2 小时' }],
+      },
+    }) as ReturnType<typeof Config>
+    const service = createAskdataService(toRuntimeConfig(configured))
+    expect(service.config.duty.project).toBe('桃曲坡水库')
+    expect(service.config.duty.stations[0]!.metrics[0]!.thresholds![0]!.value).toBe(786.8)
+    expect(service.tools.map((t) => t.name)).toContain('generate_duty_report')
+  })
+
+  it('值班报告面配置校验：非法测站 id / 重复指标键 / 空 metrics 加载期报错', () => {
+    const conn = { host: 'fe.example.com', port: 9030, user: 'u', password: 'p', database: 'WT_DB' }
+    expect(() => createAskdataService({
+      connection: conn,
+      duty: { stations: [{ id: 'bad id!', name: 'x', metrics: [{ metric: 'm', label: 'l', unit: 'u', tagName: 'T' }] }] },
+    })).toThrow(/stations\[\]\.id/)
+    expect(() => createAskdataService({
+      connection: conn,
+      duty: {
+        stations: [{
+          id: 'S', name: 'x', metrics: [
+            { metric: 'm', label: 'l', unit: 'u', tagName: 'T1' },
+            { metric: 'm', label: 'l2', unit: 'u', tagName: 'T2' },
+          ],
+        }],
+      },
+    })).toThrow(/指标键重复/)
+    expect(() => createAskdataService({
+      connection: conn,
+      duty: { stations: [{ id: 'S', name: 'x', metrics: [] }] },
+    })).toThrow(/metrics 不能为空/)
   })
 
   it('知识面配置校验：非法基址 / 非法数据集 id 加载期报错', () => {

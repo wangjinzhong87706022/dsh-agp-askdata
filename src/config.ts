@@ -108,6 +108,64 @@ export interface AuditConfig {
 }
 
 /**
+ * 值班报告阈值档（对照 §五 8 段模板"阈值对照"）：level 为档名（汛限/警戒/保证/校核
+ * 或自定义名），value + op 为判超条件（缺省 op='>='，即观测值达到阈值即超）。
+ */
+export interface DutyThreshold {
+  level: string
+  value: number
+  op?: '>=' | '>' | '<=' | '<'
+}
+
+/** 值班报告测站指标台账项：一个 AGP 测点 + 展示口径 + 阈值档。 */
+export interface DutyMetric {
+  /** 指标键（water_level / rainfall / inflow / outflow …），同站内唯一。 */
+  metric: string
+  /** 中文指标名（表格与研判文案用）。 */
+  label: string
+  /** 计量单位（m / mm / m³/s …）。 */
+  unit: string
+  /** AGP 测点全名（tagName）；实时值经 AGP API 拉取，不走 SQL。 */
+  tagName: string
+  /** 展示小数位（缺省 2）。 */
+  decimals?: number
+  /** 阈值档（可空 = 只汇总不研判；研判建议只由阈值规则引擎产生）。 */
+  thresholds?: DutyThreshold[]
+}
+
+/** 值班报告测站台账：一个测站 = 名称 + 一组指标。 */
+export interface DutyStation {
+  id: string
+  name: string
+  metrics: DutyMetric[]
+}
+
+/** 报讯/通知对象（报告第 7 段；配置化，不由 LLM 生成）。 */
+export interface DutyReporting {
+  /** 通知对象（如"市防汛抗旱指挥部"）。 */
+  object: string
+  /** 通道/方式（如"防汛专报"）。 */
+  channel?: string
+  /** 频次（如"超汛限期间每 2 小时一次"）。 */
+  frequency?: string
+}
+
+/**
+ * 值班报告面配置（防汛值班报告 Agent，docs/architecture.md §19）。
+ *
+ * 测站台账与阈值是部署事实（工程专属），全部走配置；台账为空时值班工具在
+ * 调用期给出明确提示，不影响其余工具面。报告产物目录缺省落在 $DSH_HOME/outputs。
+ */
+export interface DutyConfig {
+  /** 工程/河段名（报告头；如"桃曲坡水库"）。 */
+  project: string
+  /** 报告产物目录；空 = $DSH_HOME/outputs，再退 ./outputs。 */
+  outputDir: string
+  stations: DutyStation[]
+  reporting: DutyReporting[]
+}
+
+/**
  * RAGFlow 知识面配置（graph / wiki / 原文检索，与 ragflow-import 工具链同源）。
  *
  * 知识面是问数的第二数据源：TSDB 给数值，RAGFlow 给依据（规程原文、实体关系、
@@ -140,6 +198,8 @@ export interface AskdataConfig {
   security: SecurityConfig
   audit: AuditConfig
   knowledge: KnowledgeConfig
+  /** 值班报告面（防汛值班报告 Agent；空台账 = 面不可用，调用期明确提示）。 */
+  duty: DutyConfig
 }
 
 /** 合法 SQL 标识符（表/列名），防御表名配置被注入。 */
@@ -249,6 +309,14 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     maxChunks: 8,
     maxGraphEntities: 60,
   },
+  // 值班报告面默认空台账：防汛值班工具在未配置测站时调用期明确报错，
+  // 不影响取数/知识面；阈值与报讯路径是工程专属部署事实，不内嵌默认值。
+  duty: {
+    project: '',
+    outputDir: '',
+    stations: [] as DutyStation[],
+    reporting: [] as DutyReporting[],
+  },
 }
 
 /**
@@ -266,6 +334,7 @@ export function resolveConfig(input: {
   security?: Partial<SecurityConfig>
   audit?: Partial<AuditConfig>
   knowledge?: Partial<KnowledgeConfig>
+  duty?: Partial<DutyConfig>
 }): AskdataConfig {
   const tables = { ...DEFAULT_CONFIG.tables, ...input.tables }
   const system = { ...DEFAULT_CONFIG.system, ...input.system }
@@ -311,6 +380,7 @@ export function resolveConfig(input: {
   }
 
   const knowledge = resolveKnowledgeConfig(input.knowledge)
+  const duty = resolveDutyConfig(input.duty)
 
   return {
     connection: { ...input.connection, driver },
@@ -322,6 +392,7 @@ export function resolveConfig(input: {
     security,
     audit,
     knowledge,
+    duty,
   }
 }
 
@@ -350,5 +421,97 @@ export function resolveKnowledgeConfig(input?: Partial<KnowledgeConfig>): Knowle
     timeoutMs,
     maxChunks: Math.min(50, Math.max(1, Math.trunc(merged.maxChunks))),
     maxGraphEntities: Math.min(1024, Math.max(1, Math.trunc(merged.maxGraphEntities))),
+  }
+}
+
+/** 测站 id / 指标键形态（报告文件名与 rule_id 的拼装原料，禁路径分隔符等）。 */
+const DUTY_KEY_RE = /^[0-9A-Za-z_\u4e00-\u9fff-]{1,64}$/
+
+/** 阈值判超操作符全集。 */
+const DUTY_THRESHOLD_OPS: readonly DutyThreshold['op'][] = ['>=', '>', '<=', '<']
+
+/**
+ * 值班报告面配置解析：台账形态校验（测站 id/指标键/tagName 非空且合法、
+ * 阈值 op 合法、小数位 0-8）。台账为空是合法部署（值班工具调用期提示），
+ * 配置了台账但字段非法则在加载期失败。
+ */
+export function resolveDutyConfig(input?: Partial<DutyConfig>): DutyConfig {
+  const merged = { ...DEFAULT_CONFIG.duty, ...input }
+  const seenStationIds = new Set<string>()
+  for (const station of merged.stations) {
+    if (!DUTY_KEY_RE.test(station.id)) {
+      throw new Error(`配置错误：duty.stations[].id 非法（字母/数字/下划线/中文/连字符，1-64 字符）: ${station.id}`)
+    }
+    if (seenStationIds.has(station.id)) {
+      throw new Error(`配置错误：duty.stations 测站 id 重复: ${station.id}`)
+    }
+    seenStationIds.add(station.id)
+    if (!station.name || station.name.length > 100) {
+      throw new Error(`配置错误：duty.stations[${station.id}].name 必填且 ≤100 字符`)
+    }
+    if (!Array.isArray(station.metrics) || station.metrics.length === 0) {
+      throw new Error(`配置错误：duty.stations[${station.id}].metrics 不能为空`)
+    }
+    const seenMetrics = new Set<string>()
+    for (const metric of station.metrics) {
+      if (!DUTY_KEY_RE.test(metric.metric)) {
+        throw new Error(`配置错误：duty.stations[${station.id}].metrics[].metric 非法: ${metric.metric}`)
+      }
+      if (seenMetrics.has(metric.metric)) {
+        throw new Error(`配置错误：duty.stations[${station.id}] 指标键重复: ${metric.metric}`)
+      }
+      seenMetrics.add(metric.metric)
+      if (!metric.label || metric.label.length > 100) {
+        throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}].label 必填且 ≤100 字符`)
+      }
+      if (!metric.tagName || metric.tagName.length > 200) {
+        throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}].tagName 必填（AGP 测点全名）`)
+      }
+      if (metric.decimals !== undefined && (!Number.isInteger(metric.decimals) || metric.decimals < 0 || metric.decimals > 8)) {
+        throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}].decimals 必须是 0-8 整数`)
+      }
+      for (const threshold of metric.thresholds ?? []) {
+        if (!threshold.level || threshold.level.length > 20) {
+          throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}] 阈值 level 必填且 ≤20 字符`)
+        }
+        if (!Number.isFinite(threshold.value)) {
+          throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}] 阈值 ${threshold.level}.value 必须是数值`)
+        }
+        if (threshold.op !== undefined && !DUTY_THRESHOLD_OPS.includes(threshold.op)) {
+          throw new Error(`配置错误：duty.stations[${station.id}].metrics[${metric.metric}] 阈值 ${threshold.level}.op 只允许 >= > <= <`)
+        }
+      }
+    }
+  }
+  for (const item of merged.reporting) {
+    if (!item.object || item.object.length > 100) {
+      throw new Error('配置错误：duty.reporting[].object 必填且 ≤100 字符')
+    }
+  }
+  if (merged.project.length > 100) {
+    throw new Error('配置错误：duty.project ≤100 字符')
+  }
+  return {
+    project: merged.project,
+    outputDir: merged.outputDir,
+    stations: merged.stations.map((s) => ({
+      id: s.id,
+      name: s.name,
+      metrics: s.metrics.map((m) => ({
+        metric: m.metric,
+        label: m.label,
+        unit: m.unit,
+        tagName: m.tagName,
+        ...(m.decimals !== undefined ? { decimals: Math.trunc(m.decimals) } : {}),
+        ...(m.thresholds ? {
+          thresholds: m.thresholds.map((t) => ({ level: t.level, value: t.value, ...(t.op !== undefined ? { op: t.op } : {}) })),
+        } : {}),
+      })),
+    })),
+    reporting: merged.reporting.map((r) => ({
+      object: r.object,
+      ...(r.channel !== undefined ? { channel: r.channel } : {}),
+      ...(r.frequency !== undefined ? { frequency: r.frequency } : {}),
+    })),
   }
 }
