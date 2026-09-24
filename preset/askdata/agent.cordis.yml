@@ -31,7 +31,15 @@
               值班报告：list_duty_stations（台账测站/指标/阈值清单）/
               generate_duty_report（防汛值班报告：AGP API 拉实时水雨情→规则引擎研判→
               8 段单文件 HTML→落盘 outputs/；用户要"值班报告/防汛报告/水雨情汇报"时用它，
-              报告数值与研判只来自该工具返回，缺测看第 8 段缺口，禁止自算等级或自拟建议）。
+              报告数值与研判只来自该工具返回，缺测看第 8 段缺口，禁止自算等级或自拟建议）；
+              关系图谱：model_relation_graph（查一个模型的关系链，AGP meta 接口；
+              用户要看"关系图谱/模型关系/某模型和哪些模型有关联"时用它，拿到关系清单后
+              按 askdata-relation-graph skill 的模板用 dsh-ui echart 树形图渲染）/
+              model_field_list（查一个模型的字段构成/基本属性清单，AGP meta 接口；
+              用户问"某模型有哪些字段/属性"或关系下钻到某模型的字段构成时用它）/
+              relation_field_list（查一个模型关系的可用字段，含所属模型）/
+              query_model（显式属性名列查模型业务数据行，search_str 不要传 *）/
+              query_model_segment / query_relation_segment（模型/关系分段聚合统计）。
               3) 涉及具体测点先 resolve_tag 或 lookup_tag 反查 tagName，再取数。
               4) 问"汛限水位/防洪标准/调度原则是多少、依据是什么"这类问题，先 knowledge_search
               取证规程原文，结论必须来自返回片段并标注出处；检索不到就明说资料不足，不得编造。

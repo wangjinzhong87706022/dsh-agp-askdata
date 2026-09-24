@@ -52,6 +52,8 @@ export interface QueryConfig {
     wtOpenid: string
     /** REST 调用失败时自动回落 SQL 通道（默认开；关闭则失败直接返回）。 */
     fallbackToSql: boolean
+    /** meta 数据查询单页最大行数（pageSize 上限；AGP 接口要求 <1000）。 */
+    maxPageSize: number
   }
   /** 是否启用预聚合表路由（false = 强制只用 WT_DATA 全聚合；通用行业/口径存疑时关闭）。 */
   useAggregateTable: boolean
@@ -200,6 +202,15 @@ export interface AskdataConfig {
   knowledge: KnowledgeConfig
   /** 值班报告面（防汛值班报告 Agent；空台账 = 面不可用，调用期明确提示）。 */
   duty: DutyConfig
+  /**
+   * 工具组开关（部署形态隔离，默认全开 = 现状 19 工具）：
+   * - sql：P0 五 + P1 六 + askdata_deep_analysis（内网 StarRocks/MySQL 取数面）
+   * - api：值班报告二 + 关系图谱一（AGP REST 网关面）
+   * - knowledge：RAGFlow 知识面四工具
+   * 云端 API 部署（如 openagp.top）关 sql：模型工具集里没有任何 SQL 工具，
+   * persona 也不会提及，避免"只有光伏域 SQL 工具却被问云端项目"时的工具名幻觉。
+   */
+  toolsets: { sql: boolean; api: boolean; knowledge: boolean }
 }
 
 /** 合法 SQL 标识符（表/列名），防御表名配置被注入。 */
@@ -269,7 +280,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
   tables: { tag: 'WT_TAG', data: 'WT_DATA', cube: 'WT_CUBE', device: 'WT_DEVICE' },
   query: {
     tsdbChannel: 'sql',
-    rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true },
+    rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true, maxPageSize: 1000 },
     useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
@@ -317,6 +328,8 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     stations: [] as DutyStation[],
     reporting: [] as DutyReporting[],
   },
+  // 工具组默认全开（现状 19 工具）；云端 API 部署配 { sql: false }。
+  toolsets: { sql: true, api: true, knowledge: true },
 }
 
 /**
@@ -335,6 +348,7 @@ export function resolveConfig(input: {
   audit?: Partial<AuditConfig>
   knowledge?: Partial<KnowledgeConfig>
   duty?: Partial<DutyConfig>
+  toolsets?: Partial<AskdataConfig['toolsets']>
 }): AskdataConfig {
   const tables = { ...DEFAULT_CONFIG.tables, ...input.tables }
   const system = { ...DEFAULT_CONFIG.system, ...input.system }
@@ -381,6 +395,11 @@ export function resolveConfig(input: {
 
   const knowledge = resolveKnowledgeConfig(input.knowledge)
   const duty = resolveDutyConfig(input.duty)
+  const toolsets = {
+    sql: input.toolsets?.sql ?? DEFAULT_CONFIG.toolsets.sql,
+    api: input.toolsets?.api ?? DEFAULT_CONFIG.toolsets.api,
+    knowledge: input.toolsets?.knowledge ?? DEFAULT_CONFIG.toolsets.knowledge,
+  }
 
   return {
     connection: { ...input.connection, driver },
@@ -393,6 +412,7 @@ export function resolveConfig(input: {
     audit,
     knowledge,
     duty,
+    toolsets,
   }
 }
 

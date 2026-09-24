@@ -47,6 +47,7 @@ const STATION_ARGS = {
       wtOpenid: 'openid-x',
       wtToken: 'token-y',
       fallbackToSql: false,
+      maxPageSize: 1000,
     },
   },
 }
@@ -247,7 +248,7 @@ describe('generate_duty_report', () => {
     try {
       const r = await tracked(rig({
         configOverrides: {
-          query: { rest: { baseUrl: 'http://agp-gateway.example.com/iot-etl/iot', wtAppid: '', wtOpenid: '', wtToken: '', fallbackToSql: false } },
+          query: { rest: { baseUrl: 'http://agp-gateway.example.com/iot-etl/iot', wtAppid: '', wtOpenid: '', wtToken: '', fallbackToSql: false, maxPageSize: 1000 } },
         },
       }))
       withOutput(r)
@@ -265,7 +266,7 @@ describe('generate_duty_report', () => {
   it('未配置 baseUrl：报告按全缺口产出（缺测不编造），缺口段带 AGP API 未配置指引', async () => {
     const r = await tracked(rig({
       configOverrides: {
-        query: { rest: { baseUrl: '', wtAppid: '', wtOpenid: '', wtToken: '', fallbackToSql: false } },
+        query: { rest: { baseUrl: '', wtAppid: '', wtOpenid: '', wtToken: '', fallbackToSql: false, maxPageSize: 1000 } },
       },
     }))
     withOutput(r)

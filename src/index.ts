@@ -16,16 +16,20 @@ import { executeQueryViaMysql2 } from './clients/starrocks-mysql2.ts'
 import { executeQueryViaMysql } from './clients/mysql-mysql2.ts'
 import { RagflowClient } from './clients/ragflow.ts'
 import { randomUUID } from 'node:crypto'
-import { allTools } from '../tools/index.ts'
+import { p0Tools, p1Tools, subagentTools, knowledgeTools, dutyTools, metaTools } from '../tools/index.ts'
 import type { AskdataTool, SqlExecutor, ToolContext } from '../tools/index.ts'
 import type { AuditRow } from './audit.ts'
 import { assertSafeToExecute } from './sql/whitelist.ts'
 import { askdataError } from './errors.ts'
 
+/** SQL 取数面（P0 五 + P1 六 + deep_analysis 编排）与 AGP REST 面（值班报告 + meta 元数据面）。 */
+const sqlTools: AskdataTool[] = [...p0Tools, ...p1Tools, ...subagentTools]
+const apiTools: AskdataTool[] = [...dutyTools, ...metaTools]
+
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 全部工具面（P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告面二，共 18 个）。 */
+  /** 按配置 toolsets 过滤后的工具面（默认全开 = 24 个；云端 API 形态 12 个）。 */
   tools: AskdataTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
   createContext(options?: {
@@ -62,6 +66,7 @@ export function createAskdataService(input: {
   audit?: Partial<AskdataConfig['audit']>
   knowledge?: Partial<AskdataConfig['knowledge']>
   duty?: Partial<DutyConfig>
+  toolsets?: Partial<AskdataConfig['toolsets']>
 }): AskdataService {
   const config = resolveConfig(input)
   // 知识面客户端：datasetIds 为空时不装配（知识工具调用期明确报错），
@@ -96,7 +101,17 @@ export function createAskdataService(input: {
   )
   return {
     config,
-    tools: allTools,
+    // 工具组开关（docs/architecture.md §21）：sql=内网 SQL 取数面（P0 五 + P1 六 +
+    // deep_analysis），api=AGP REST 面（值班报告二 + meta 元数据面六），knowledge=RAGFlow 四。
+    // 默认全开（现状 24 个）；云端 API 部署关 sql——模型工具集无任何 SQL 工具，
+    // 杜绝"只有光伏域 SQL 工具却被问云端项目"时的工具名幻觉。
+    tools: (() => {
+      const enabled: AskdataTool[] = []
+      if (config.toolsets.sql) enabled.push(...sqlTools)
+      if (config.toolsets.api) enabled.push(...apiTools)
+      if (config.toolsets.knowledge) enabled.push(...knowledgeTools)
+      return enabled
+    })(),
     createContext(options) {
       return {
         config,

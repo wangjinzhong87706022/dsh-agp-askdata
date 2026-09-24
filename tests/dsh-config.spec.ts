@@ -16,8 +16,8 @@ function defaultConfig(): ReturnType<typeof Config> {
 describe('配置页默认值可装配', () => {
   it('schema 默认值经 toRuntimeConfig → createAskdataService 全程通过', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    // P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告二 = 18
-    expect(service.tools).toHaveLength(18)
+    // P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告二 + meta 六 = 24
+    expect(service.tools).toHaveLength(24)
     expect(service.config.query.aggregateTable).toBe('WT_CUBE')
     expect(service.config.query.cubeTypeMap[7]).toBe(DEFAULT_CUBE_TYPE_MAP[7])
     expect(service.config.query.granularityMap['1D']).toBe(2)
@@ -176,5 +176,46 @@ describe('配置页元数据（schemastery meta → DSH 渲染）', () => {
     expect(asDict(knowledge).ragflowApiKey.meta.role).toBe('secret')
     expect(knowledge.meta.collapse).toBe(true)
     expect(knowledge.meta.description).toContain('RAGFlow')
+  })
+})
+
+describe('工具组开关（toolsets）', () => {
+  const conn = { host: 'fe.example.com', port: 9030, user: 'u', password: 'p', database: 'WT_DB' }
+
+  it('默认全开：24 个工具（现状兼容）', () => {
+    const service = createAskdataService(toRuntimeConfig(defaultConfig()))
+    expect(service.tools).toHaveLength(24)
+    expect(service.tools.map((t) => t.name)).toContain('lookup_tag')
+    expect(service.tools.map((t) => t.name)).toContain('model_relation_graph')
+    expect(service.tools.map((t) => t.name)).toContain('model_field_list')
+    expect(service.tools.map((t) => t.name)).toContain('query_model')
+  })
+
+  it('云端 API 形态（sql=false）：仅 API 面 + 知识面 12 个，无任何 SQL 工具', () => {
+    const service = createAskdataService({
+      connection: conn,
+      toolsets: { sql: false, api: true, knowledge: true },
+    })
+    const names = service.tools.map((t) => t.name)
+    expect(names).toHaveLength(12)
+    expect(names).toEqual(expect.arrayContaining([
+      'generate_duty_report', 'list_duty_stations', 'model_relation_graph', 'model_field_list',
+      'relation_field_list', 'query_model', 'query_model_segment', 'query_relation_segment',
+      'knowledge_graph', 'knowledge_search', 'knowledge_wiki_page', 'knowledge_mindmap',
+    ]))
+    for (const sqlTool of ['lookup_tag', 'lookup_model', 'resolve_tag', 'time_series', 'latest_value', 'aggregate', 'askdata_deep_analysis']) {
+      expect(names).not.toContain(sqlTool)
+    }
+  })
+
+  it('纯 SQL 形态（api=false, knowledge=false）：内网取数面 12 个', () => {
+    const service = createAskdataService({
+      connection: conn,
+      toolsets: { sql: true, api: false, knowledge: false },
+    })
+    const names = service.tools.map((t) => t.name)
+    expect(names).toHaveLength(12) // P0 五 + P1 六 + deep_analysis
+    expect(names).not.toContain('model_relation_graph')
+    expect(names).not.toContain('knowledge_search')
   })
 })

@@ -8,6 +8,9 @@
  * P2 顺序：先图谱定位实体（knowledge_graph），再原文取证（knowledge_search），
  *          再按需取全景页面（knowledge_wiki_page）或层级导航（knowledge_mindmap）。
  * 值班面顺序：先台账（list_duty_stations），再报告（generate_duty_report）。
+ * 关系图谱：model_relation_graph（AGP meta 关系链 + dsh-ui 树形图渲染指引）；
+ *           model_field_list / relation_field_list（模型/关系字段构成）；
+ *           query_model / query_model_segment / query_relation_segment（模型/关系数据与分段聚合）。
  * @module
  */
 
@@ -30,6 +33,12 @@ import { knowledgeWikiPageTool } from './knowledge-wiki-page.ts'
 import { knowledgeMindmapTool } from './knowledge-mindmap.ts'
 import { dutyReportTool } from './duty-report.ts'
 import { dutyStationsTool } from './duty-stations.ts'
+import { modelRelationGraphTool } from './model-relation-graph.ts'
+import { modelFieldListTool } from './model-field-list.ts'
+import { relationFieldListTool } from './relation-field-list.ts'
+import { queryModelTool } from './query-model.ts'
+import { queryModelSegmentTool } from './query-model-segment.ts'
+import { queryRelationSegmentTool } from './query-relation-segment.ts'
 
 /** P0 全部工具，按推荐调用顺序排列。 */
 export const p0Tools: AskdataTool[] = [
@@ -80,8 +89,31 @@ export const dutyTools: AskdataTool[] = [
   dutyReportTool,
 ]
 
-/** 全部工具（P0 + P1 + subagent-style + 知识面 + 值班报告面，共 18 个）。 */
-export const allTools: AskdataTool[] = [...p0Tools, ...p1Tools, ...subagentTools, ...knowledgeTools, ...dutyTools]
+/**
+ * AGP meta 元数据面工具（docs/architecture.md §20，恢复自事故丢失的 tools-api 面）：
+ * model_relation_graph 查模型关系链（关系图谱 + dsh-ui 树形图渲染指引）；
+ * model_field_list / relation_field_list 查模型/关系的字段构成；
+ * query_model 查模型业务数据；query_model_segment / query_relation_segment
+ * 做模型/关系分段聚合统计。推荐链路：关系链 → 字段构成 → 数据/聚合。
+ */
+export const metaTools: AskdataTool[] = [
+  modelRelationGraphTool,
+  modelFieldListTool,
+  relationFieldListTool,
+  queryModelTool,
+  queryModelSegmentTool,
+  queryRelationSegmentTool,
+]
+
+/** 全部工具（P0 + P1 + subagent-style + 知识面 + 值班报告面 + meta 面，共 24 个）。 */
+export const allTools: AskdataTool[] = [
+  ...p0Tools,
+  ...p1Tools,
+  ...subagentTools,
+  ...knowledgeTools,
+  ...dutyTools,
+  ...metaTools,
+]
 
 export {
   lookupTagTool,
@@ -102,5 +134,11 @@ export {
   knowledgeMindmapTool,
   dutyReportTool,
   dutyStationsTool,
+  modelRelationGraphTool,
+  modelFieldListTool,
+  relationFieldListTool,
+  queryModelTool,
+  queryModelSegmentTool,
+  queryRelationSegmentTool,
 }
 export type { AskdataTool, ToolContext, SqlExecutor, ToolLayer } from './types.ts'

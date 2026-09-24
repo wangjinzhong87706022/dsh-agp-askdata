@@ -83,6 +83,7 @@ export const Config = z.object({
       wtToken: z.string().role('secret').default('').description('鉴权头 WT-TOKEN（密文）'),
       wtOpenid: z.string().default('').description('鉴权头 WT-OPENID'),
       fallbackToSql: z.boolean().default(true).description('REST 调用失败（网关不可达/响应不合法）时自动回落 SQL 通道；关闭则失败直接返回'),
+      maxPageSize: z.number().default(1000).min(1).description('meta 数据查询单页最大行数（query_model 等的 pageSize 上限；AGP 接口要求 <1000）'),
     }).collapse().description('REST 通道（TSDB HTTP 网关）'),
     useAggregateTable: z.boolean().default(true)
       .description('是否使用 WT_CUBE 预聚合路由：开启后 aggregate 对 1H/1D/1M/1Y 粒度 tag 自动查聚合表（快）；关闭 = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),
@@ -163,6 +164,15 @@ export const Config = z.object({
       .description('报讯/通知路径（报告第 7 段；配置化，不由 LLM 生成）'),
   }).collapse().description('防汛值班报告面（AGP API 实时值 + 规则研判 + 8 段 HTML 报告；docs/architecture.md §19）'),
 
+  toolsets: z.object({
+    sql: z.boolean().default(true)
+      .description('内网 SQL 取数面（P0 五 + P1 六 + askdata_deep_analysis，StarRocks/MySQL）。云端 API 部署（内网库不可达）请关闭——模型工具集将无任何 SQL 工具，杜绝工具名幻觉'),
+    api: z.boolean().default(true)
+      .description('AGP REST 面（generate_duty_report / list_duty_stations / model_relation_graph，走 query.rest 网关）'),
+    knowledge: z.boolean().default(true)
+      .description('RAGFlow 知识面（knowledge_graph / knowledge_search / knowledge_wiki_page / knowledge_mindmap）'),
+  }).collapse().description('工具组开关（部署形态隔离；默认全开 = 19 工具。云端 API 形态：sql=false + presetId=askdata-api）'),
+
   installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
   presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）'),
 })
@@ -218,6 +228,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
     audit: config.audit,
     knowledge: config.knowledge,
     duty: config.duty,
+    toolsets: config.toolsets,
   }
 }
 
@@ -241,7 +252,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }, 'askdata: dispose service')
 
   if (config.installPreset) {
+    // 双 preset：askdata（内网全量 persona）+ askdata-api（云端纯 API persona，
+    // 不提及任何 SQL 工具名）。各自幂等安装，部署按 presetId 选用。
     await installPreset(ctx, config.presetId)
+    if (config.presetId !== 'askdata-api') {
+      await installPreset(ctx, 'askdata-api')
+    }
   }
 }
 
@@ -253,14 +269,14 @@ export function resolveDshHome(env: Record<string, string | undefined> = process
 }
 
 /**
- * 安装 `preset/askdata/` 到 `$DSH_HOME/.agent-presets/<presetId>/`。
+ * 安装 `preset/<presetId>/` 到 `$DSH_HOME/.agent-presets/<presetId>/`。
  *
  * 幂等：目标已存在（以 agent.cordis.yml 为准）则跳过，绝不覆盖用户改动；
  * 尽力而为：失败仅告警并给出手动安装指引，不阻断启动。
  */
 export async function installPreset(ctx: Context, presetId: string): Promise<boolean> {
   const targetDir = join(resolveDshHome(), '.agent-presets', presetId)
-  const sourceDir = fileURLToPath(new URL('../../preset/askdata/', import.meta.url))
+  const sourceDir = fileURLToPath(new URL(`../../preset/${presetId}/`, import.meta.url))
   try {
     const exists = await access(join(targetDir, 'agent.cordis.yml')).then(
       () => true,

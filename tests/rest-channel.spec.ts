@@ -16,7 +16,7 @@ function restConfig(restOverrides: Record<string, unknown> = {}): AskdataConfig 
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
     query: {
       tsdbChannel: 'rest',
-      rest: { baseUrl: 'http://gw.example.com/iot-etl/iot', wtAppid: '10062', wtToken: 't', wtOpenid: 'o', fallbackToSql: true, ...restOverrides },
+      rest: { baseUrl: 'http://gw.example.com/iot-etl/iot', wtAppid: '10062', wtToken: 't', wtOpenid: 'o', fallbackToSql: true, maxPageSize: 1000, ...restOverrides },
     },
   })
 }

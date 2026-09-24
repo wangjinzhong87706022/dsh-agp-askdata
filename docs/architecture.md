@@ -855,3 +855,100 @@ meta_filter 场次限定生效。dsh web E2E 10/11（六条功能链路全过；
   cordis.patch.yml 缺失，manifest 声明强制 → 启动失败），已从 home-e2e web profile 的
   bundles 摘除（值班报告链路不依赖 dsh-ui）；`dsh web` 子命令不接受 `--patch`，须用
   `dsh --profile web --patch <file>` 启动器形态。
+
+## 20. 关系图谱（模型关系链，2026-09-23）
+
+> 来源：《基础的数据底座查询接口 20260913》§2.9（getRelationsByModel）。在 AGP 问数助手里
+> 以工具 + skill（关系图谱）形态落地；树形图用 dsh-genui 的 `type:'echart'` 围栏渲染
+> （ECharts tree，option 直通）。
+
+### 20.1 接口与实现（线上实证，与 PDF 文档的差异）
+
+| 项 | PDF 文档 | 线上实证（openagp.top 10462 项目） |
+|---|---|---|
+| 路径 | `/s1M6_uE9/wz/meta/getRelationsByModel` | 同左（前端在 `/v7i0_wG9/`，后端 API 段是 config.js 的 `backSuffix=/s1M6_uE9` + `serviceWz=/s1M6_uE9/wz`） |
+| modelName | "模型名称"（中文） | **实际匹配 class_path**（如 `wt_elm_equipment/wt_10462_shuibengmoxing`）——中文名必须先经 `POST /meta/model/queryByGenericSql`（查 meta_class_info.class_alias）解析 |
+| 编码 | — | Content-Type 声称 UTF-8 实际发 GBK 字节——工具按 UTF-8 严格解码失败回退 GBK |
+| 信封 | code 数字 / message | getRelationsByModel 同 PDF；queryByGenericSql 返回 code:"0" 字符串 + msg 字段——两种形态都收 |
+| 数据 | — | 关系行含 relation_description（关系中文名）、leftModelName/rightModelName（对端模型中文名），可直接组树 |
+
+工具实现：`tools/model-relation-graph.ts`（两步：中文名→class_path→关系链；入参含 "/" 时视为
+class_path 直传）。渲染指引作为数据末行返回，模型按 `askdata-relation-graph` skill 的
+echart tree 模板输出 ```dsh-ui 围栏。工具面 18 → **19**；skill 5 → **6**。
+
+### 20.2 模型字段构成（model_field_list，2026-09-24）
+
+> 来源：同 PDF §2.3（getModelBasAttributes）。背景实证：只有关系图谱工具时，模型对
+> "设备参数列模型的字段构成"这类下钻问题只能去 RAGFlow 撞运气并如实报告查不到
+> （知识库是业务规程文档，没有建模字典）——需要专门的字段查询工具。
+
+| 项 | 线上实证（openagp.top 10462 项目，2026-09-24 实测） |
+|---|---|
+| 路径 | `GET /s1M6_uE9/wz/meta/getModelBasAttributes?modelName=<中文模型名>` |
+| modelName | **直接收中文模型名**（如 设备参数列模型、水泵模型）——与 §2.9 的 class_path 行为不同 |
+| 信封 | 同构：`data.field`=列定义，`data.data`=属性行（field_name/field_description/field_type） |
+| 语义 | 屏蔽"不显示"属性、含计算属性、继承重载取后者（PDF §2.3）；field_type 为类型码 |
+
+工具实现：`tools/model-field-list.ts`（主路中文名直查；报「模型不存在」类错误时回落
+queryByGenericSql 解析 class_path 重试一次，复用 §20.1 的两步辅助）。查关系链与查
+字段构成在两个工具的 description 里互设交叉引用，模型路由不迷路。
+
+### 20.3 凭证与地址（记忆位）
+
+- 网关：`https://www.openagp.top:9080`（项目 10462；前端前缀 `/v7i0_wG9`，后端 `/s1M6_uE9`）
+- 凭据：`E:\dsh\home\.credentials.yaml` 的 `AGP10462_API_TOKEN / AGP10462_API_OPENID`（机器本地，不入 git）
+- home-e2e overlay（`E:\dsh\home-e2e\duty-e2e.patch.yml`）的 query.rest 已指向该网关真实凭证
+
+### 20.4 meta 数据查询族（恢复自事故丢失的 tools-api 面，2026-09-24）
+
+**考古结论**（pickaxe 全历史实证，2026-09-24）：本插件曾在 §18.x 时期（09-10/09-11，
+提交 118108f..3f27672）实现过 PDF §2 接口族的完整工具面 `tools-api/`（14 文件：
+list-models / model-attributes / query-model / query-model-segment /
+query-relation-segment / model-tags / object-tags / resolve-tag / tag-real /
+tag-history / tag-wide / tag-aggregate + src/api/client.ts + tests/tools-api.spec.ts，
+§18.6 API-only 收口 + §18.7 真实浏览器 E2E 通过）。09-22 文件丢失事故中该目录从
+工作区消失（无删除提交），事故后重建（104c1f3/2a363fb，parent=3b75110）基于的树里
+已无此目录——主线的现行 `tools/` 面是并行演化的另一实现（测点/时序/聚合已覆盖），
+meta 数据查询族自此断档。
+
+**2026-09-24 恢复**（现行契约重写，语义自 3f27672 移植 + 当日真实网关复测）：
+
+| 工具 | PDF 接口 | 说明 |
+|---|---|---|
+| `model_field_list` | §2.3 getModelBasAttributes | 模型字段构成（中文名直查；"模型不存在"回落 class_path） |
+| `relation_field_list` | §2.6 getRelationBasAttributes | 关系字段构成（返回列含所属模型 model_name） |
+| `query_model` | §2.2 postModelDataMeta | 模型业务数据行（参数全传语义；**search_str 禁止 `*`**——服务端展开含物理表不存在的列报 Unknown column，2026-09-24 实测） |
+| `query_model_segment` | §2.7 postModelAggrigateData | 模型分段聚合统计（segment: [{where_str,title}]） |
+| `query_relation_segment` | §2.8 postRelationAggrigateData | 关系分段聚合（relationName + 可选左右继承模型） |
+
+共享件 `tools/meta-common.ts`：动态 fields（响应 field 数组 → ResultField）、
+类型码映射（1/11/22→number，52→datetime）、分页透传（page）、pageSize 上限
+`query.rest.maxPageSize`（默认 1000，AGP 要求 <1000）、parseSegments、agpPost。
+推荐调用链：关系链（model_relation_graph）→ 字段构成（*_field_list）→
+数据/聚合（query_*）。类型码全集与信封差异同 §18.4/§18.5 记录。
+未恢复：list-models/model-tags/object-tags（现行 lookup_model/lookup-tag 面已覆盖）、
+§2.4/§2.5 关系数据明文查询（旧面亦未实现，需求出现再加）。
+
+## 21. 工具组开关与双 preset（部署形态隔离，2026-09-23）
+
+**背景**：云端网关（openagp.top 10462 项目）与内网 SQL 库（StarRocks/MySQL 10062 光伏）
+是两个不连通的数据世界。全量工具面在云端部署时，persona 静态提及的 SQL 工具名会诱发
+模型工具名幻觉（实测：模型自述"我只有光伏域的 lookup_model/lookup_object…"并编造
+list_models/object_tags 等不存在的工具）。
+
+**机制**：`toolsets` 三布尔配置（settings 页"工具组开关"组）：
+
+| 开关 | 工具组 | 缺省 |
+|---|---|---|
+| `toolsets.sql` | P0 五 + P1 六 + askdata_deep_analysis（内网 SQL 取数面） | true |
+| `toolsets.api` | generate_duty_report / list_duty_stations / model_relation_graph / model_field_list / relation_field_list / query_model / query_model_segment / query_relation_segment（AGP REST） | true |
+| `toolsets.knowledge` | RAGFlow 知识面四工具 | true |
+
+默认全开 = 现状 24 工具；**云端 API 部署：`toolsets:{sql:false}` + `presetId:'askdata-api'`**
+→ 工具面 12 个（API 八 + 知识四），persona 为纯 API 版（preset/askdata-api，不提及任何
+SQL 工具名）。插件启动时双 preset 都安装（installPreset 幂等），部署按 presetId 选用；
+home-e2e 的 settings.yaml `agent-presets.default` 也需同步指定。
+
+**实测**（Playwright，云端网关）：新会话 preset 显示"AGP问数（API）"，问"查看水泵模型的
+关系图谱"→ 2 次工具调用（中文名解析 + 关系链）→ 回复零 SQL 工具名 → echart 树形图
+完整渲染（11 条关系）。19 秒 / 19.5K tok。

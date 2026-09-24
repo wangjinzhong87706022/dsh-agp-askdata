@@ -33,7 +33,7 @@ export interface AskdataSkill {
   content: string
 }
 
-/** askdata 提供的 5 个 skill 聚合（顺序即目录展示顺序）。 */
+/** askdata 提供的 6 个 skill 聚合（顺序即目录展示顺序）。 */
 export const ASKDATA_SKILLS: readonly AskdataSkill[] = [
   {
     name: 'askdata-troubleshoot',
@@ -268,6 +268,113 @@ Y = 年聚合（1Y 走 WT_CUBE）
 - "为什么没有 XX 测站？"→ 台账未配置或 station_ids 没选；list_duty_stations 核对。
 - "规程依据为什么是空的？"→ 知识面未装配（knowledge.datasetIds）或检索为空；缺口写在第 8 段。
 - "能直接给我开闸建议吗？"→ 不能；系统边界只出研判建议与通知对象，调度决策归防汛指挥机构。
+`,
+  },
+  {
+    name: 'askdata-relation-graph',
+    description: '关系图谱与模型字段构成：模型关系链查询（AGP meta 接口）、dsh-ui echart 树形图渲染模板、字段下钻。',
+    whenToUse: '用户要看"关系图谱/模型关系/关系链"、问某模型和哪些模型有关联、需要把 model_relation_graph 的结果画成树形图、或问"某模型有哪些字段/属性/字段构成"时调用。',
+    content: `# 关系图谱工作流手册
+
+## 1. 端到端流程
+
+\`\`\`
+[1] model_relation_graph(model_name: "某模型") → 返回该模型的所有模型关系清单
+[2] 按下方模板以 \`\`\`dsh-ui 围栏输出 echart 树形图谱
+[3] 文字概述：关系数量、对端模型清单、每条关系的含义
+\`\`\`
+
+## 2. dsh-ui 树形图模板（echart tree，配色 + 拖拽缩放 + 点击下钻）
+
+工具返回的关系清单每行是一条关系（JSON）。把它们按"对端模型"聚合为树，
+**套用下面的完整模板**（已内置配色、可拖拽缩放 roam、展开/收起、悬停高亮、
+保存图片按钮和点击下钻桥，只需替换 title 与 data）：
+
+\`\`\`dsh-ui
+{"type":"echart","title":"某模型 · 关系图谱（N 条关系）","height":560,
+ "actionTemplate":"下钻模型：{name}",
+ "option":{
+  "tooltip":{"trigger":"item","triggerOn":"mousemove"},
+  "toolbox":{"show":true,"feature":{"saveAsImage":{}},"right":10,"top":2},
+  "series":[{
+    "type":"tree","roam":true,"expandAndCollapse":true,"initialTreeDepth":-1,
+    "orient":"LR","left":16,"right":200,"top":10,"bottom":10,
+    "symbol":"circle","symbolSize":12,
+    "itemStyle":{"color":"#5b8ff9","borderColor":"#5b8ff9","borderWidth":2},
+    "lineStyle":{"color":"#b8c6dd","width":1.5,"curveness":0.45},
+    "label":{"position":"left","fontSize":13,"color":"#47607c","distance":6},
+    "leaves":{"symbolSize":9,"itemStyle":{"color":"#5ad8a6"},
+              "label":{"position":"right","fontSize":13,"color":"#2e7d5b"}},
+    "emphasis":{"focus":"descendant","lineStyle":{"width":2.5},
+                "itemStyle":{"color":"#f6bd16","borderColor":"#f6bd16"}},
+    "animationDuration":400,
+    "data":[{"name":"某模型","children":[
+      {"name":"关系A","children":[{"name":"对端模型1"},{"name":"对端模型2"}]},
+      {"name":"关系B","children":[{"name":"对端模型3"}]}
+    ]}]
+  }]
+}}
+\`\`\`
+
+要点：顶层节点 = 所查模型；第二层 = 关系名称（多条关系对同一对端模型时合并为
+一个关系节点挂多个叶子）；叶子 = 对端模型名。数据缺失时不要编造关系。
+\`actionTemplate\` 是点击下钻桥：用户点图上任意节点，会以 [genui-action]
+"下钻模型：节点名" 发回给你——按 §5 处理。
+
+## 3. 字段下钻（model_field_list）
+
+关系图谱常引出下钻问题——"XX 模型的字段构成/有哪些字段/属性清单"。这类问题
+**不要**再去 knowledge_search 撞运气（知识库是业务规程文档，没有建模字典），
+直接调用 \`model_field_list(model_name: "对端模型中文名")\`：
+
+\`\`\`
+[1] model_field_list(model_name: "设备参数列模型") → 属性行（field_name/field_description/field_type）
+[2] 以表格呈现：属性名称 / 描述 / 类型码；文字概述字段构成的业务含义
+\`\`\`
+
+要点：结果直接来自 meta 接口，不要编造字段；返回 0 行时说明该模型全部属性
+被设置为不显示，如实告知。与关系图谱的关系：图谱查"模型之间怎么连"，
+字段清单查"模型本身长什么样"，两者互补。
+
+## 4. 数据与聚合下钻（query_model / query_model_segment / relation_field_list）
+
+字段清单之后的自然延伸是"查数据"：
+
+\`\`\`
+[1] query_model(model_name: "设备参数列模型", search_str: "id,code,name,canshuzhi,shuoming")
+    → 模型业务数据行（表格呈现；search_str 必须显式列名，传 * 会报 Unknown column）
+[2] query_model_segment(model_name, search_str: "code,count(*) as 计数",
+    segment: [{where_str:"tree_level > 0", title:"有层级"}, …]) → 分段聚合表
+[3] relation_field_list(relation_name: "设备参数列表") → 关系可用字段（含所属模型）
+\`\`\`
+
+要点：先 model_field_list/relation_field_list 查可用字段，再组装 search_str/
+where_str；属性名中英文皆可；分页默认 100 行、上限 1000，数据多时说明总数并
+建议收窄 where 条件。
+
+## 5. 点击下钻（[genui-action] 处理手册）
+
+关系图谱卡片带 \`actionTemplate:"下钻模型：{name}"\`：用户点击图上任意节点
+（模型/关系名），你会收到一条 \`[genui-action] 下钻模型：XX\` 消息。处理流程：
+
+\`\`\`
+[1] 从 [genui-action] 提取目标节点名 XX（区分不清时问一句，不要猜）
+[2] model_relation_graph(model_name: "XX") → 取回 XX 的关系清单
+[3] 在上一条 dsh-ui 围栏的 data 里定位名为 XX 的节点：
+    - XX 是叶子/已有节点 → 把新关系清单合并为它的 children
+      （已有的关系不重复挂；对端模型也是节点，可继续下钻）
+    - 沿用 §2 的完整模板（配色/actionTemplate 原样保留），重新输出整棵树
+[4] 文字概述：为 XX 新增了哪些关系；深度超过 2 层时提示可收窄视图
+\`\`\`
+
+要点：合并而不是替换——保留用户已浏览的层级；同一条关系已出现在树中时跳过；
+用户也可能直接打字"下钻 XX"，按同样流程处理。若 XX 查不到关系（0 行），
+如实说明并保持原图不变。
+
+## 3. 边界
+
+- 接口只读（AGP meta getRelationsByModel），按项目编号隔离。
+- AGP API 未配置/不可达时工具报 BACKEND_DOWN——如实转告，不要用 knowledge_graph（那是 RAGFlow 文档图谱）冒充模型关系。
 `,
   },
 ] as const

@@ -1,5 +1,5 @@
 /**
- * askdata skill 注册单测：name 合法、description ≤ 200、5 个常量稳定、注册接口形态。
+ * askdata skill 注册单测：name 合法、description ≤ 200、6 个常量稳定、注册接口形态。
  * @module
  */
 
@@ -15,8 +15,8 @@ import {
 const NAME_RE = /^[a-z][a-z0-9-]{1,40}$/
 
 describe('ASKDATA_SKILLS 常量', () => {
-  it('导出 5 个 skill 且 name 全部 kebab-case 合法', () => {
-    expect(ASKDATA_SKILLS).toHaveLength(5)
+  it('导出 6 个 skill 且 name 全部 kebab-case 合法', () => {
+    expect(ASKDATA_SKILLS).toHaveLength(6)
     for (const s of ASKDATA_SKILLS) {
       expect(s.name, s.name).toMatch(NAME_RE)
     }
@@ -31,10 +31,10 @@ describe('ASKDATA_SKILLS 常量', () => {
     }
   })
 
-  it('5 个 skill 覆盖排查/编码/工作流/配置/值班报告五个正交主题', () => {
+  it('6 个 skill 覆盖排查/编码/工作流/配置/值班报告/关系图谱六个正交主题', () => {
     const names = ASKDATA_SKILLS.map((s) => s.name).sort()
     expect(names).toEqual(
-      ['askdata-config', 'askdata-query-pattern', 'askdata-tagname', 'askdata-troubleshoot', 'askdata-duty-report'].sort(),
+      ['askdata-config', 'askdata-query-pattern', 'askdata-tagname', 'askdata-troubleshoot', 'askdata-duty-report', 'askdata-relation-graph'].sort(),
     )
   })
 
@@ -78,13 +78,13 @@ describe('askdata-skills cordis 行形态', () => {
       },
     } as never
     apply(ctx)
-    expect(registered).toHaveLength(5)
+    expect(registered).toHaveLength(6)
     for (const s of registered) {
       expect(s.invocation).toEqual({ modelInvocable: true, userInvocable: true })
       expect(s.source).toBe('runtime')
       expect(s.provider).toBe('runtime')
     }
-    expect(dispose).toHaveLength(5) // 每个 skill 注册都对应一个 disposer
+    expect(dispose).toHaveLength(6) // 每个 skill 注册都对应一个 disposer
   })
 
   it('apply 在 ctx.skills 缺席时优雅跳过（不抛错）', () => {
@@ -96,7 +96,7 @@ describe('verify 注册路径在宿主 services 可用时不抛（运行时烟�
   it('mock 的 skills.register 被精确调用 4 次，参数顺序稳定', () => {
     const spy: ReturnType<typeof vi.fn> = vi.fn(() => () => {})
     apply({ skills: { register: spy as unknown as (s: unknown) => () => void }, effect: () => {} } as never)
-    expect(spy).toHaveBeenCalledTimes(5)
+    expect(spy).toHaveBeenCalledTimes(6)
     const names = (spy.mock.calls as unknown as Array<[{ name: string }]>).map((c) => c[0].name)
     expect(names).toEqual(ASKDATA_SKILLS.map((s) => s.name))
   })
