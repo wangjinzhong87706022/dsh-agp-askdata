@@ -113,13 +113,12 @@ describe('model_relation_graph', () => {
     const hintText = String((hint as Record<string, unknown>).hint)
     expect(hintText).toContain('actionTemplate')
     expect(hintText).toContain('下钻模型：{name}')
-    expect(hintText).toContain('5ad8a6')
+    expect(hintText).toContain('"preset":"tree"')
+    expect(hintText).toContain('"drill":{"key":"水泵模型"}')
     expect(hintText).toContain('水泵模型')
     expect(hintText).toContain('[genui-action]')
     // patch 协议 + drill key + 关闭节点收起（浏览点击不再误触下钻）
-    expect(hintText).toContain('"drill":{"key":"水泵模型"}')
     expect(hintText).toContain('drillPatch')
-    expect(hintText).toContain('"expandAndCollapse":false')
     expect(hintText).toContain('幂等检查')
   })
 
@@ -147,7 +146,7 @@ describe('model_relation_graph', () => {
     expect(hint).toContain('经XX链路')
   })
 
-  it('chartDrillInteraction 默认关：模板无 drill/actionTemplate/patch 协议，样式保留', async () => {
+  it('chartDrillInteraction 默认关：模板无 drill/actionTemplate/patch 协议，preset tree 保留', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
       return jsonResponse(RELATION_ENVELOPE)
@@ -159,9 +158,8 @@ describe('model_relation_graph', () => {
     expect(hint).not.toContain('actionTemplate')
     expect(hint).not.toContain('[genui-action]')
     expect(hint).not.toContain('drillPatch')
-    expect(hint).toContain('5ad8a6')
-    expect(hint).toContain('水泵模型')
-    expect(hint).toContain('"roam":true')
+    expect(hint).toContain('"preset":"tree"')
+    expect(hint).toContain('"tree":{"data":[{"name":"水泵模型"')
   })
 
   it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {

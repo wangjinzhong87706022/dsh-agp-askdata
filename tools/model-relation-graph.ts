@@ -207,22 +207,14 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
     rightModelName: '',
     direct: '',
     hint:
-      `请套用以下 dsh-ui 围栏模板输出树形图（JSON 结构逐字保留，把 data 里的示例节点按下方规则换成真实数据）：\n` +
+      `请套用以下 dsh-ui 围栏模板输出树形图（结构逐字保留，tree.data 里的示例节点按下方规则换成真实数据；` +
+      `配色/交互全部内置，不要自己补 option 或样式字段）：\n` +
       '```dsh-ui\n' +
-      `{"type":"echart","title":"${modelName} · 关系图谱（${relationCount} 条关系）","height":560,` +
+      `{"type":"echart","preset":"tree","title":"${modelName} · 关系图谱（${relationCount} 条关系）","height":560,` +
       `${drillFields}` +
-      `"option":{"tooltip":{"trigger":"item","triggerOn":"mousemove"},` +
-      `"toolbox":{"show":true,"feature":{"saveAsImage":{}},"right":10,"top":2},"series":[{"type":"tree",` +
-      `"roam":true,${drillEnabled ? '"expandAndCollapse":false,' : ''}"initialTreeDepth":-1,"orient":"LR","left":16,"right":200,` +
-      `"top":10,"bottom":10,"symbol":"circle","symbolSize":12,` +
-      `"itemStyle":{"color":"#5b8ff9","borderColor":"#5b8ff9","borderWidth":2},` +
-      `"lineStyle":{"color":"#b8c6dd","width":1.5,"curveness":0.45},` +
-      `"label":{"position":"left","fontSize":13,"color":"#47607c","distance":6},` +
-      `"leaves":{"symbolSize":9,"itemStyle":{"color":"#5ad8a6"},"label":{"position":"right","fontSize":13,"color":"#2e7d5b"}},` +
-      `"emphasis":{"focus":"descendant","lineStyle":{"width":2.5},"itemStyle":{"color":"#f6bd16","borderColor":"#f6bd16"}},` +
-      `"animationDuration":400,"data":[{"name":"${modelName}","children":[` +
+      `"tree":{"data":[{"name":"${modelName}","children":[` +
       `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
-      `{"name":"经中继模型链路","children":[{"name":"对端模型2"},{"name":"对端模型3"}]}]}]}]}}\n` +
+      `{"name":"经中继模型链路","children":[{"name":"对端模型2"}]}]}]}}\n` +
       '```\n' +
       `${dataRule}\n` +
       `${drillProtocol}` +
