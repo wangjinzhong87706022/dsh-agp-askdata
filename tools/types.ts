@@ -57,6 +57,12 @@ export interface AskdataTool {
   layer: ToolLayer
   /** JSON Schema 形式的入参描述。 */
   inputSchema: Record<string, unknown>
+  /**
+   * 模型/前端可见的结果预览行数上限（`src/dsh/adapter.ts` render 用）。
+   * 缺省 20（SQL 行查询面历史值）；有界元数据清单类工具（meta 面）声明
+   * 更大值——完整清单本身就是答案，静默截断会让模型给出"自信的错答案"。
+   */
+  previewLimit?: number
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>
 }
 

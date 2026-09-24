@@ -929,6 +929,24 @@ meta 数据查询族自此断档。
 未恢复：list-models/model-tags/object-tags（现行 lookup_model/lookup-tag 面已覆盖）、
 §2.4/§2.5 关系数据明文查询（旧面亦未实现，需求出现再加）。
 
+#### 20.4.1 预览与完整性契约（分场景设计，2026-09-24）
+
+背景实证：设备参数列模型有 51 条关系，全局 20 行预览截断后模型只拿到 20 条——
+有界清单的截断不是省 token，是**让模型给出自信的错答案**。设计原则：分页是人的
+交互概念；Agent 工具第一原则是**单次自完备 + 显式总量**，翻页只留给真正无界的数据
+（一整轮 LLM 调用的成本远高于多给几十行短字段）。
+
+| 场景 | 工具 | 设计 |
+|---|---|---|
+| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | `previewLimit: 300`（安全上限，超限 complete=false）；模型面全量返回；关系行带 `direct` 标记（查询模型是端点=直接关系，API 会返回经链路展开的间接关系）；关系数 >40 时渲染指引切换为"直接展开 + 间接按对端模型聚合计数" |
+| 无界业务数据 | query_model | 保留分页；`page.itemTotal` 顶层透出为 `total`，单页即全量时 `complete=true`；description 教"total 超一页先收窄 where_str 或改用 query_model_segment，不要逐页翻" |
+| 聚合统计 | query_model_segment / query_relation_segment | 输出天然小，同样透出 total/complete |
+
+机制：`ToolResult.total/complete`（模型可见的完整性契约，adapter 顶层透出）+
+`AskdataTool.previewLimit`（工具自声明的模型/前端预览上限，缺省仍 20——SQL 行
+查询面不受影响）。反面清单：不给元数据工具暴露分页参数（诱导翻页循环）；不为
+"完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。
+
 ## 21. 工具组开关与双 preset（部署形态隔离，2026-09-23）
 
 **背景**：云端网关（openagp.top 10462 项目）与内网 SQL 库（StarRocks/MySQL 10062 光伏）

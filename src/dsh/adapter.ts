@@ -43,6 +43,10 @@ export interface AskdataToolValue {
   rowCount: number
   executionMs: number
   auditId: string
+  /** 数据集总量（分页 itemTotal / 有界清单全量）；缺省 = 未声明。 */
+  total?: number
+  /** 完整性契约：true = data 即全量；缺省视为 true。 */
+  complete?: boolean
 }
 
 /** parameters JSON Schema：type/object + properties + required（来自 ToolDefinition 契约）。 */
@@ -57,19 +61,26 @@ export function toParametersJsonSchema(input: Record<string, unknown>): Record<s
   }
 }
 
-/** 工具结果 → 模型/渲染文本（fields + 行样例 + 元信息；大结果截断展示，完整 data 在 canonical 值里）。 */
-export function renderAskdataResult(value: AskdataToolValue): string {
+/** 工具结果 → 模型/渲染文本（fields + 行预览 + 元信息）。
+ *
+ * 预览行数上限由工具自声明（`AskdataTool.previewLimit`，缺省 20）：有界元数据
+ * 清单（meta 面）声明更大值——完整清单本身就是答案。total/complete 是完整性
+ * 契约：模型据其判断拿到的是不是全部，决定收窄条件或聚合而不是盲目翻页。 */
+export function renderAskdataResult(value: AskdataToolValue, previewLimit = 20): string {
   const head = [
     '```json',
     JSON.stringify(
       {
         toolName: value.toolName,
         rowCount: value.rowCount,
+        ...(value.total !== undefined ? { total: value.total, complete: value.complete ?? value.rowCount >= value.total } : {}),
         executionMs: value.executionMs,
         auditId: value.auditId,
         fields: value.fields,
-        data: value.data.slice(0, 20),
-        ...(value.data.length > 20 ? { truncatedPreview: `仅展示前 20 行，共 ${value.rowCount} 行` } : {}),
+        data: value.data.slice(0, previewLimit),
+        ...(value.data.length > previewLimit
+          ? { truncatedPreview: `仅展示前 ${previewLimit} 行，共 ${value.total ?? value.rowCount} 行` }
+          : {}),
       },
       null,
       2,
@@ -119,11 +130,13 @@ export function adaptAskdataTool(
           rowCount: { type: 'integer' },
           executionMs: { type: 'integer' },
           auditId: { type: 'string' },
+          total: { type: 'integer' },
+          complete: { type: 'boolean' },
         },
         required: ['success', 'toolName', 'apiOrSql', 'fields', 'data', 'rowCount', 'executionMs', 'auditId'],
         additionalProperties: false,
       },
-      render: (_args, value) => [{ type: 'text', text: renderAskdataResult(value as AskdataToolValue) }],
+      render: (_args, value) => [{ type: 'text', text: renderAskdataResult(value as AskdataToolValue, tool.previewLimit ?? 20) }],
     },
     presentCall: (args) => ({
       card: 'generic',
@@ -147,5 +160,6 @@ function toValue(result: ToolResult): AskdataToolValue {
     rowCount: result.rowCount,
     executionMs: result.executionMs,
     auditId: result.auditId,
+    ...(result.total !== undefined ? { total: result.total, complete: result.complete ?? true } : {}),
   }
 }

@@ -101,8 +101,13 @@ describe('model_relation_graph', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toContain('queryByGenericSql')
     expect(res.rowCount).toBe(3) // 2 条关系 + 1 行渲染指引
+    expect(res.total).toBe(2)
+    expect(res.complete).toBe(true)
     expect(res.data[0]!.relation_description).toBe('设备分组和设备的关系')
     expect(res.data[0]!.rightModelName).toBe('设备分组模型')
+    // direct 标记：查询模型（水泵模型）不是这两条关系的端点 → 否
+    expect(res.data[0]!.direct).toBe('否')
+    expect(res.data[1]!.direct).toBe('否')
     const hint = res.data.at(-1)!
     expect(String(hint.relation_description)).toContain('渲染指引')
     const hintText = String((hint as Record<string, unknown>).hint)
@@ -111,6 +116,35 @@ describe('model_relation_graph', () => {
     expect(hintText).toContain('5ad8a6')
     expect(hintText).toContain('水泵模型')
     expect(hintText).toContain('[genui-action]')
+    // patch 协议 + drill key + 关闭节点收起（浏览点击不再误触下钻）
+    expect(hintText).toContain('"drill":{"key":"水泵模型"}')
+    expect(hintText).toContain('drillPatch')
+    expect(hintText).toContain('"expandAndCollapse":false')
+    expect(hintText).toContain('幂等检查')
+  })
+
+  it('直接关系标记与超阈值分组指引：direct=是 + >40 行时指引切换为聚合', async () => {
+    const manyRows = Array.from({ length: 45 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: i === 0 ? '直接关系甲' : `间接关系${i}`,
+      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
+      rightModelName: i === 0 ? '设备基础模型' : `对端模型${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
+    })
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.success).toBe(true)
+    expect(res.total).toBe(45)
+    expect(res.complete).toBe(true)
+    const rows = res.data.slice(0, 45)
+    expect(rows[0]!.direct).toBe('是') // 查询模型是端点
+    expect(rows[1]!.direct).toBe('否')
+    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
+    expect(hint).toContain('直接 1 条 + 间接 44 条')
+    expect(hint).toContain('按中继模型')
+    expect(hint).toContain('经XX链路')
   })
 
   it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {

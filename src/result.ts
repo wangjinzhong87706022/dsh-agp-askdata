@@ -39,6 +39,16 @@ export interface ToolResult {
   errorMessage: string
   errorCode: ErrorCode | ''
   page?: PageInfo
+  /**
+   * 数据集总量（分页接口的 itemTotal；无分页接口等于 rowCount）。
+   * 模型据其判断"拿到的是不是全部"，决定收窄条件或聚合而不是盲目翻页。
+   */
+  total?: number
+  /**
+   * 完整性契约：true = data 即全量；false = 因安全上限/分页只回了部分。
+   * 缺省视为 true（工具自行保证）。静默不完整是模型给错答案的根源之一。
+   */
+  complete?: boolean
 }
 
 /** 成功返回。 */
@@ -52,6 +62,8 @@ export function ok(
     executionMs: number
     auditId?: string
     page?: PageInfo
+    total?: number
+    complete?: boolean
   },
 ): ToolResult {
   return {
@@ -68,6 +80,8 @@ export function ok(
     errorMessage: '',
     errorCode: '',
     page: args.page,
+    total: args.total,
+    complete: args.complete,
   }
 }
 

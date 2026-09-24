@@ -38,6 +38,7 @@ function isModelNotFound(message: string): boolean {
 /** model_field_list 工具定义。 */
 export const modelFieldListTool: AskdataTool = {
   name: 'model_field_list',
+  previewLimit: 300,
   description:
     '查询一个模型的基本属性（字段构成）：返回该模型的全部可用属性名、描述与类型码。'
     + '输入中文模型名（如 设备参数列模型、水泵模型、水库模型；也接受 class_path 形态）。'
@@ -104,6 +105,8 @@ export const modelFieldListTool: AskdataTool = {
         fields: FIELDS,
         data,
         executionMs: Date.now() - started,
+        total: env.rows.length,
+        complete: true,
       })
       applyAudit(modelFieldListTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result

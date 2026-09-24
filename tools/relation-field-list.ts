@@ -25,6 +25,7 @@ const FIELDS: ResultField[] = [
 /** relation_field_list 工具定义。 */
 export const relationFieldListTool: AskdataTool = {
   name: 'relation_field_list',
+  previewLimit: 300,
   description:
     '查询一个模型关系的基本属性（关系里可用的字段清单，含所属模型）。'
     + '输入中文关系名称（如 设备参数列表、组织和用户的关系；可从 model_relation_graph '
@@ -81,6 +82,8 @@ export const relationFieldListTool: AskdataTool = {
         fields: FIELDS,
         data,
         executionMs: Date.now() - started,
+        total: env.rows.length,
+        complete: true,
       })
       applyAudit(relationFieldListTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result

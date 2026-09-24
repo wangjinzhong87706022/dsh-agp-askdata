@@ -81,6 +81,7 @@ export const queryRelationSegmentTool: AskdataTool = {
       const described = describeEnvelope(env)
 
       const apiOrSql = `POST ${metaBase}/postRelationAggrigateData (relationName=${relationName}, ${body.segment.length} 段) → ${described.data.length} 行`
+      const itemTotal = described.page !== undefined ? described.page.itemTotal : undefined
       const result = ok(queryRelationSegmentTool.name, {
         apiOrSql,
         params: args,
@@ -88,6 +89,9 @@ export const queryRelationSegmentTool: AskdataTool = {
         data: described.data,
         page: described.page,
         executionMs: Date.now() - started,
+        ...(itemTotal !== undefined
+          ? { total: itemTotal, complete: described.data.length >= itemTotal }
+          : {}),
       })
       applyAudit(queryRelationSegmentTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result

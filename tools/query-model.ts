@@ -26,7 +26,9 @@ export const queryModelTool: AskdataTool = {
     '查询一个模型的业务数据（模型实例行，如"设备参数列模型里有哪些参数记录"）。'
     + '输入中文模型名 + 显式属性名列表（先用 model_field_list 查该模型可用字段，'
     + '不要传 *，服务端展开 * 会报 Unknown column）。支持中文属性名、where 条件、'
-    + '排序、分组、分页。数据来自 AGP 数据底座 meta 接口（postModelDataMeta），只读。',
+    + '排序、分组、分页；返回 total 为全量行数。用法约定：total 超过一页时不要逐页翻，'
+    + '优先收窄 where_str（按属性过滤）或改用 query_model_segment 聚合统计。'
+    + '数据来自 AGP 数据底座 meta 接口（postModelDataMeta），只读。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
@@ -82,6 +84,7 @@ export const queryModelTool: AskdataTool = {
       const described = describeEnvelope(env)
 
       const apiOrSql = `POST ${metaBase}/postModelDataMeta (modelName=${modelName}, searchStr=${searchStr}) → ${described.data.length} 行`
+      const itemTotal = described.page !== undefined ? described.page.itemTotal : undefined
       const result = ok(queryModelTool.name, {
         apiOrSql,
         params: args,
@@ -89,6 +92,10 @@ export const queryModelTool: AskdataTool = {
         data: described.data,
         page: described.page,
         executionMs: Date.now() - started,
+        // 完整性契约：total（分页 itemTotal）顶层透出；单页即全量时 complete=true。
+        ...(itemTotal !== undefined
+          ? { total: itemTotal, complete: described.data.length >= itemTotal }
+          : {}),
       })
       applyAudit(queryModelTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result

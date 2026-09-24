@@ -92,6 +92,58 @@ describe('adaptAskdataTool', () => {
     expect(rendered).toContain('"rowCount": 25')
   })
 
+  it('previewLimit 由工具自声明：meta 面 300 行内不截断', async () => {
+    const metaLike: AskdataTool = {
+      ...lookupTagTool,
+      name: 'meta_like',
+      previewLimit: 300,
+    }
+    const def = adaptAskdataTool(metaLike, () => makeContext(() => ({ columns: [], rows: [] })))
+    const output = def.output as {
+      render: (args: unknown, value: unknown) => Array<{ type: string; text: string }>
+    }
+    const value = {
+      success: true,
+      toolName: 'meta_like',
+      apiOrSql: 'GET x',
+      fields: [],
+      data: Array.from({ length: 51 }, (_, i) => ({ rank: i + 1 })),
+      rowCount: 51,
+      executionMs: 5,
+      auditId: 'a1',
+    }
+    const blocks = output.render({}, value)
+    expect(blocks[0]!.text).not.toContain('truncatedPreview')
+    expect(blocks[0]!.text).toContain('"rank": 51') // 51 行全部在预览内
+    expect(renderAskdataResult(value, 300)).not.toContain('truncatedPreview')
+  })
+
+  it('total/complete 完整性契约透传到 canonical 值与模型可见渲染', async () => {
+    const def = adaptAskdataTool(lookupTagTool, () =>
+      makeContext(() => ({ columns: [], rows: [] })),
+    )
+    const value = {
+      success: true,
+      toolName: 'query_model',
+      apiOrSql: 'POST x',
+      fields: [],
+      data: Array.from({ length: 25 }, (_, i) => ({ id: i })),
+      rowCount: 25,
+      executionMs: 5,
+      auditId: 'a1',
+      total: 51,
+      complete: false,
+    }
+    const output = def.output as {
+      render: (args: unknown, value: unknown) => Array<{ type: string; text: string }>
+    }
+    const text = output.render({}, value)[0]!.text
+    expect(text).toContain('"total": 51')
+    expect(text).toContain('"complete": false')
+    expect(text).toContain('仅展示前 20 行，共 51 行')
+    expect(text).toContain('truncatedPreview')
+  })
+
   it('presentCall 标题含工具名与参数摘要', () => {
     const def = adaptAskdataTool(lookupTagTool, () => makeContext(() => ({ columns: [], rows: [] })))
     const view = def.presentCall?.({ keyword: '告警' }) as { title: string; card: string }

@@ -99,6 +99,27 @@ describe('query_model', () => {
     expect(res.fields[0]!.type).toBe('number') // type '1' → number
     expect(res.data[0]).toMatchObject({ id: 1, name: '汛限水位', canshuzhi: '786.8' })
     expect(res.page).toMatchObject({ itemTotal: 2 })
+    // 完整性契约：单页即全量 → total=2, complete=true
+    expect(res.total).toBe(2)
+    expect(res.complete).toBe(true)
+  })
+
+  it('total 超过单页：complete=false（模型据其收窄而非翻页）', async () => {
+    const bigEnvelope = {
+      ...MODEL_DATA_ENVELOPE,
+      data: {
+        ...MODEL_DATA_ENVELOPE.data,
+        page: { pageNum: 1, pageSize: 100, pageTotal: 5, itemTotal: 420 },
+      },
+    }
+    const fetchImpl = vi.fn(async () => jsonResponse(bigEnvelope))
+    const res = await queryModelTool.run(
+      { model_name: '设备参数列模型', search_str: 'id,name,canshuzhi' },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res.success).toBe(true)
+    expect(res.total).toBe(420)
+    expect(res.complete).toBe(false)
   })
 
   it('守卫：* 明确拒绝（服务端展开缺陷）；缺 search_str / page_size 非法', async () => {
