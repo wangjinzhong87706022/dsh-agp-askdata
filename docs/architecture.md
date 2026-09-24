@@ -947,6 +947,21 @@ meta 数据查询族自此断档。
 查询面不受影响）。反面清单：不给元数据工具暴露分页参数（诱导翻页循环）；不为
 "完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。
 
+#### 20.4.2 点击下钻交互（默认关，chartDrillInteraction，2026-09-24）
+
+点击节点 → `[genui-action]` → 模型回 `drillPatch` 增量并入原图（协议见
+dsh-genui actionTemplate/drill 字段）。每次下钻是一整轮 LLM 调用（数十秒 +
+token），且单击语义与浏览冲突、误触成本高——**默认关闭**
+（`query.chartDrillInteraction: false`，settings 页"查询路由"组）。
+
+- 关（默认）：首图模板不带 drill/actionTemplate，图照常渲染（配色/roam/保存图片），
+  点击无任何副作用；dsh-genui 的下钻机制保留但字段不出现即完全惰性。
+- 开（`chartDrillInteraction: true`）：模板携带 drill.key/actionTemplate +
+  patch 响应协议（幂等检查 → 只发新增子树 → 并入首图），客户端乐观占位 +
+  单飞串行队列（chips 可取消）生效。
+- 语义隔离：开启时模板显式 `expandAndCollapse:false`（单击=下钻，不再兼职
+  收起）；关闭时 echarts 默认 true（单击收起/展开照常可用）。
+
 ## 21. 工具组开关与双 preset（部署形态隔离，2026-09-23）
 
 **背景**：云端网关（openagp.top 10462 项目）与内网 SQL 库（StarRocks/MySQL 10062 光伏）

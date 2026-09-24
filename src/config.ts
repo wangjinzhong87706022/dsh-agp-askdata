@@ -63,6 +63,12 @@ export interface QueryConfig {
   cubeTypeMap: Record<number, string>
   /** 层3：粒度后缀 → granularity 值映射。 */
   granularityMap: Record<string, number>
+  /**
+   * 关系图谱点击下钻交互（默认关）。开启后首图模板携带 drill.key/actionTemplate，
+   * 点击节点会发起一轮 LLM 下钻（有耗时与 token 成本）；关闭时图照常渲染、
+   * 点击无副作用。模型数据查询族等其余能力不受影响。
+   */
+  chartDrillInteraction: boolean
 }
 
 /** 系统护栏与阈值。 */
@@ -285,6 +291,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
     granularityMap: DEFAULT_GRANULARITY_MAP,
+    chartDrillInteraction: false,
   },
   system: {
     maxScanRows: 100_000_000,

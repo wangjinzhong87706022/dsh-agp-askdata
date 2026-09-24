@@ -48,10 +48,10 @@ const RELATION_ENVELOPE = {
   },
 }
 
-function ctxOf(fetchImpl: (url: string | URL | Request) => Promise<Response>): ToolContext {
+function ctxOf(fetchImpl: (url: string | URL | Request) => Promise<Response>, opts?: { drill?: boolean }): ToolContext {
   const config = resolveConfig({
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
-    query: { rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 } },
+    query: { rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 }, chartDrillInteraction: opts?.drill === true },
   })
   const executor = { execute: async () => ({ columns: [], rows: [] }) }
   return { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as typeof fetch }
@@ -84,7 +84,7 @@ describe('decodeAgpEnvelope helpers', () => {
 })
 
 describe('model_relation_graph', () => {
-  it('两步主链：中文名 → queryByGenericSql 解析 class_path → getRelationsByModel → 关系清单 + 渲染指引', async () => {
+  it('两步主链：中文名 → queryByGenericSql 解析 class_path → getRelationsByModel → 关系清单 + 渲染指引（chartDrillInteraction 开）', async () => {
     const calls: string[] = []
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const u = String(url)
@@ -96,7 +96,7 @@ describe('model_relation_graph', () => {
       expect(u).toBe('https://www.openagp.top:9080/s1M6_uE9/wz/meta/getRelationsByModel?modelName=wt_elm_equipment%2Fwt_10462_shuibengmoxing')
       return jsonResponse(RELATION_ENVELOPE)
     })
-    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch, { drill: true }))
     expect(res.success).toBe(true)
     expect(calls).toHaveLength(2)
     expect(calls[0]).toContain('queryByGenericSql')
@@ -145,6 +145,23 @@ describe('model_relation_graph', () => {
     expect(hint).toContain('直接 1 条 + 间接 44 条')
     expect(hint).toContain('按中继模型')
     expect(hint).toContain('经XX链路')
+  })
+
+  it('chartDrillInteraction 默认关：模板无 drill/actionTemplate/patch 协议，样式保留', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse(RELATION_ENVELOPE)
+    })
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.success).toBe(true)
+    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
+    expect(hint).not.toContain('"drill"')
+    expect(hint).not.toContain('actionTemplate')
+    expect(hint).not.toContain('[genui-action]')
+    expect(hint).not.toContain('drillPatch')
+    expect(hint).toContain('5ad8a6')
+    expect(hint).toContain('水泵模型')
+    expect(hint).toContain('"roam":true')
   })
 
   it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {

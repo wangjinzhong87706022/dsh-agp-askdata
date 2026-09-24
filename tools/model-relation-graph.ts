@@ -170,8 +170,10 @@ export async function resolveClassPath(ctx: ToolContext, metaBase: string, model
 }
 
 /** 渲染指引（作为最后一行数据输出给模型）。自包含完整模板——不依赖 skill 注入。
- * 模板本身保持纯合法 JSON（模型照抄不会踩语法坑），data 构造规则放在 JSON 外。 */
-function renderHintRow(modelName: string, relationCount: number, directCount: number): Record<string, unknown> {
+ * 模板本身保持纯合法 JSON（模型照抄不会踩语法坑），data 构造规则放在 JSON 外。
+ * drillEnabled=false（默认，query.chartDrillInteraction）时模板不带
+ * drill/actionTemplate，也没有下钻响应协议——图照常渲染、点击无副作用。 */
+function renderHintRow(modelName: string, relationCount: number, directCount: number, drillEnabled: boolean): Record<string, unknown> {
   const grouped = relationCount > GROUPED_HINT_THRESHOLD
   const dataRule = grouped
     ? `data 构造规则（本模型 ${relationCount} 条 = 直接 ${directCount} 条 + 间接 ${relationCount - directCount} 条）：` +
@@ -180,6 +182,23 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
       `同组多条时在名字后带计数（如"对端模型A ×3"）。间接关系不要逐条平铺。`
     : `data 构造规则：第二层 = 关系名（relation_description），叶子 = 对端模型（rightModelName）；` +
       `同一对端模型多条关系时合并到一个关系节点。`
+  const drillFields = drillEnabled
+    ? `"actionTemplate":"下钻模型：{name}","drill":{"key":"${modelName}"},`
+    : ''
+  const drillProtocol = drillEnabled
+    ? `点击图上节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
+      `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
+      `不调用工具、不输出围栏。\n` +
+      `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏（把新增子树并入首图，绝对不要重绘整棵树；` +
+      `children 必须写成真实数据元素、至少 1 个，禁止省略号或注释）：\n` +
+      '```dsh-ui\n' +
+      `{"type":"echart","title":"已展开「X」（并入上图）","drill":{"key":"${modelName}"},` +
+      `"drillPatch":{"key":"${modelName}","target":"X","children":[` +
+      `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
+      `{"name":"经XX链路","children":[{"name":"对端模型2"}]}]}}\n` +
+      '```\n' +
+      `[3] key 固定用首图 key（"${modelName}"）；文字概述 1-2 句即可。\n`
+    : ''
   return {
     rank: 0,
     relation_name: '',
@@ -191,10 +210,10 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
       `请套用以下 dsh-ui 围栏模板输出树形图（JSON 结构逐字保留，把 data 里的示例节点按下方规则换成真实数据）：\n` +
       '```dsh-ui\n' +
       `{"type":"echart","title":"${modelName} · 关系图谱（${relationCount} 条关系）","height":560,` +
-      `"actionTemplate":"下钻模型：{name}","drill":{"key":"${modelName}"},` +
+      `${drillFields}` +
       `"option":{"tooltip":{"trigger":"item","triggerOn":"mousemove"},` +
       `"toolbox":{"show":true,"feature":{"saveAsImage":{}},"right":10,"top":2},"series":[{"type":"tree",` +
-      `"roam":true,"expandAndCollapse":false,"initialTreeDepth":-1,"orient":"LR","left":16,"right":200,` +
+      `"roam":true,${drillEnabled ? '"expandAndCollapse":false,' : ''}"initialTreeDepth":-1,"orient":"LR","left":16,"right":200,` +
       `"top":10,"bottom":10,"symbol":"circle","symbolSize":12,` +
       `"itemStyle":{"color":"#5b8ff9","borderColor":"#5b8ff9","borderWidth":2},` +
       `"lineStyle":{"color":"#b8c6dd","width":1.5,"curveness":0.45},` +
@@ -206,19 +225,8 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
       `{"name":"经中继模型链路","children":[{"name":"对端模型2"},{"name":"对端模型3"}]}]}]}]}}\n` +
       '```\n' +
       `${dataRule}\n` +
-      `文字回复概述关系数量与对端模型清单。点击图上节点会向你发 [genui-action] "下钻模型：X"，` +
-      `用户打字"下钻 X"同义。下钻响应协议：\n` +
-      `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
-      `不调用工具、不输出围栏。\n` +
-      `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏（把新增子树并入首图，绝对不要重绘整棵树；` +
-      `children 必须写成真实数据元素、至少 1 个，禁止省略号或注释）：\n` +
-      '```dsh-ui\n' +
-      `{"type":"echart","title":"已展开「X」（并入上图）","drill":{"key":"${modelName}"},` +
-      `"drillPatch":{"key":"${modelName}","target":"X","children":[` +
-      `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
-      `{"name":"经XX链路","children":[{"name":"对端模型2"}]}]}}\n` +
-      '```\n' +
-      `[3] key 固定用首图 key（"${modelName}"）；文字概述 1-2 句即可。`,
+      `${drillProtocol}` +
+      `文字回复概述关系数量与对端模型清单。`,
   }
 }
 
@@ -285,7 +293,7 @@ export const modelRelationGraphTool: AskdataTool = {
           direct: '',
         })
       } else {
-        data.push(renderHintRow(modelName, env.rows.length, data.filter((r) => r.direct === '是').length))
+        data.push(renderHintRow(modelName, env.rows.length, data.filter((r) => r.direct === '是').length, ctx.config.query.chartDrillInteraction === true))
       }
 
       const apiOrSql = `GET ${metaBase}/getRelationsByModel?modelName=${classPath} → ${env.rows.length} 条关系`
