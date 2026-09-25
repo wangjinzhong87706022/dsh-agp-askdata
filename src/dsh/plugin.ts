@@ -93,8 +93,6 @@ export const Config = z.object({
       .description('cubeType → 中文口径映射（JSON 对象；aggregate 路由与解释用。留空 {} = 不做 cubeType 路由）'),
     granularityMapJson: z.string().role('textarea').default(JSON.stringify(DEFAULT_GRANULARITY_MAP, null, 2))
       .description('粒度后缀 → WT_CUBE granularity 值映射（JSON 对象，如 {"1H":1,"1D":2}）'),
-    chartDrillInteraction: z.boolean().default(false)
-      .description('关系图谱点击下钻交互（默认关）：开启后首图模板携带 drill.key/actionTemplate，点击节点会发起一轮 LLM 下钻并增量并入上图（有耗时与 token 成本）；关闭时图照常渲染、点击无副作用'),
   }).collapse().description('查询路由（§14.10 三层：通道 → 聚合表 → 粒度；LLM 不感知路由细节）'),
 
   system: z.object({
@@ -224,7 +222,6 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
       aggregateTable: config.query.aggregateTable,
       cubeTypeMap: parseJsonMapField('query.cubeTypeMapJson', config.query.cubeTypeMapJson) as Record<number, string>,
       granularityMap: parseJsonMapField('query.granularityMapJson', config.query.granularityMapJson) as Record<string, number>,
-      chartDrillInteraction: config.query.chartDrillInteraction,
     },
     system: config.system,
     security: config.security,

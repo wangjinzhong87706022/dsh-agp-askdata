@@ -171,9 +171,9 @@ export async function resolveClassPath(ctx: ToolContext, metaBase: string, model
 
 /** 渲染指引（作为最后一行数据输出给模型）。自包含完整模板——不依赖 skill 注入。
  * 模板本身保持纯合法 JSON（模型照抄不会踩语法坑），data 构造规则放在 JSON 外。
- * drillEnabled=false（默认，query.chartDrillInteraction）时模板不带
- * drill/actionTemplate，也没有下钻响应协议——图照常渲染、点击无副作用。 */
-function renderHintRow(modelName: string, relationCount: number, directCount: number, drillEnabled: boolean): Record<string, unknown> {
+ * 双击下钻默认开启：模板携带 drill.key（客户端按 key 注册合并路由，双击节点
+ * 触发 patch 增量并入原图）；单击保留给 echarts 原生收起/展开。 */
+function renderHintRow(modelName: string, relationCount: number, directCount: number): Record<string, unknown> {
   const grouped = relationCount > GROUPED_HINT_THRESHOLD
   const dataRule = grouped
     ? `data 构造规则（本模型 ${relationCount} 条 = 直接 ${directCount} 条 + 间接 ${relationCount - directCount} 条）：` +
@@ -182,23 +182,19 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
       `同组多条时在名字后带计数（如"对端模型A ×3"）。间接关系不要逐条平铺。`
     : `data 构造规则：第二层 = 关系名（relation_description），叶子 = 对端模型（rightModelName）；` +
       `同一对端模型多条关系时合并到一个关系节点。`
-  const drillFields = drillEnabled
-    ? `"actionTemplate":"下钻模型：{name}","drill":{"key":"${modelName}"},`
-    : ''
-  const drillProtocol = drillEnabled
-    ? `点击图上节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
-      `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
-      `不调用工具、不输出围栏。\n` +
-      `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏（把新增子树并入首图，绝对不要重绘整棵树；` +
-      `children 必须写成真实数据元素、至少 1 个，禁止省略号或注释）：\n` +
-      '```dsh-ui\n' +
-      `{"type":"echart","title":"已展开「X」（并入上图）","drill":{"key":"${modelName}"},` +
-      `"drillPatch":{"key":"${modelName}","target":"X","children":[` +
-      `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
-      `{"name":"经XX链路","children":[{"name":"对端模型2"}]}]}}\n` +
-      '```\n' +
-      `[3] key 固定用首图 key（"${modelName}"）；文字概述 1-2 句即可。\n`
-    : ''
+  const drillProtocol =
+    `双击图上任意节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
+    `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
+    `不调用工具、不输出围栏。\n` +
+    `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏（把新增子树并入首图，绝对不要重绘整棵树；` +
+    `children 必须写成真实数据元素、至少 1 个，禁止省略号或注释）：\n` +
+    '```dsh-ui\n' +
+    `{"type":"echart","title":"已展开「X」（并入上图）","drill":{"key":"${modelName}"},` +
+    `"drillPatch":{"key":"${modelName}","target":"X","children":[` +
+    `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
+    `{"name":"经XX链路","children":[{"name":"对端模型2"}]}]}}\n` +
+    '```\n' +
+    `[3] key 固定用首图 key（"${modelName}"）；文字概述 1-2 句即可。\n`
   return {
     rank: 0,
     relation_name: '',
@@ -208,10 +204,10 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
     direct: '',
     hint:
       `请套用以下 dsh-ui 围栏模板输出树形图（结构逐字保留，tree.data 里的示例节点按下方规则换成真实数据；` +
-      `配色/交互全部内置，不要自己补 option 或样式字段）：\n` +
+      `配色与双击下钻全部内置，不要自己补 option 或样式字段）：\n` +
       '```dsh-ui\n' +
       `{"type":"echart","preset":"tree","title":"${modelName} · 关系图谱（${relationCount} 条关系）","height":560,` +
-      `${drillFields}` +
+      `"drill":{"key":"${modelName}"},` +
       `"tree":{"data":[{"name":"${modelName}","children":[` +
       `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
       `{"name":"经中继模型链路","children":[{"name":"对端模型2"}]}]}]}}\n` +
@@ -285,7 +281,7 @@ export const modelRelationGraphTool: AskdataTool = {
           direct: '',
         })
       } else {
-        data.push(renderHintRow(modelName, env.rows.length, data.filter((r) => r.direct === '是').length, ctx.config.query.chartDrillInteraction === true))
+        data.push(renderHintRow(modelName, env.rows.length, data.filter((r) => r.direct === '是').length))
       }
 
       const apiOrSql = `GET ${metaBase}/getRelationsByModel?modelName=${classPath} → ${env.rows.length} 条关系`

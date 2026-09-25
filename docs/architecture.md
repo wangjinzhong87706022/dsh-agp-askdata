@@ -947,20 +947,17 @@ meta 数据查询族自此断档。
 查询面不受影响）。反面清单：不给元数据工具暴露分页参数（诱导翻页循环）；不为
 "完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。
 
-#### 20.4.2 点击下钻交互（默认关，chartDrillInteraction，2026-09-24）
+#### 20.4.2 双击下钻（默认开启，2026-09-25）
 
-点击节点 → `[genui-action]` → 模型回 `drillPatch` 增量并入原图（协议见
-dsh-genui actionTemplate/drill 字段）。每次下钻是一整轮 LLM 调用（数十秒 +
-token），且单击语义与浏览冲突、误触成本高——**默认关闭**
-（`query.chartDrillInteraction: false`，settings 页"查询路由"组）。
+**双击**图上任意节点 → `[genui-action] "下钻模型：X"` → 模型回 `drillPatch` 增量
+并入原图（客户端乐观占位 + 单飞串行队列 + 同名去重）。单击保留给 echarts 原生
+收起/展开与 roam 拖拽浏览，两种交互互不干扰，无需配置开关。
 
-- 关（默认）：首图模板不带 drill/actionTemplate，图照常渲染（配色/roam/保存图片），
-  点击无任何副作用；dsh-genui 的下钻机制保留但字段不出现即完全惰性。
-- 开（`chartDrillInteraction: true`）：模板携带 drill.key/actionTemplate +
-  patch 响应协议（幂等检查 → 只发新增子树 → 并入首图），客户端乐观占位 +
-  单飞串行队列（chips 可取消）生效。
-- 语义隔离：开启时模板显式 `expandAndCollapse:false`（单击=下钻，不再兼职
-  收起）；关闭时 echarts 默认 true（单击收起/展开照常可用）。
+- 模板由渲染指引内联下发（`drill.key` = 首图根模型名）；`actionTemplate` 不再
+  要求模型抄写——drill 存在时客户端使用内置默认模板 `下钻模型：{name}`。
+- patch 协议：幂等检查（已展开直接一句回复）→ 只发新增子树 → 并入首图。
+- 历史：曾以单击触发 + `query.chartDrillInteraction` 开关控制（默认关），因
+  浏览误触成本高改为双击常开，该配置已移除。
 
 ## 21. 工具组开关与双 preset（部署形态隔离，2026-09-23）
 
