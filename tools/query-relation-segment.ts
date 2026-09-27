@@ -23,7 +23,10 @@ export const queryRelationSegmentTool: AskdataTool = {
     + '需先知道关系名称（如"设备参数列表"、"组织和用户的关系"，可从 '
     + 'model_relation_graph 的关系清单取），可选指定左右模型的继承模型。'
     + 'search_str 常用 "属性,count(*) as 计数"；关系可用属性先用 '
-    + 'relation_field_list 查。数据来自 AGP 数据底座 meta 接口，只读。',
+    + 'relation_field_list 查。数据来自 AGP 数据底座 meta 接口，只读。'
+    + '注意：若返回 SQLSyntaxErrorException（Unknown column 指向 join/on 子句），'
+    + '那是服务端关系定义自身的缺陷（换关系名会换出不同的坏列名），与入参无关，'
+    + '如实转告并建议改用 query_model 查两端模型，不要反复调整参数。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',
@@ -67,10 +70,9 @@ export const queryRelationSegmentTool: AskdataTool = {
       const body = {
         relationName,
         searchStr,
-        // whereStr 恒空串：AGP 该接口要求"参数全传、值可空"，但工具刻意不开放
-        // 全局 where 条件——分段聚合的过滤语义全部落在 segment[].where_str 上，
-        // 再开一个跨段生效的 where 会让"每段独立计算"的语义出现歧义。
-        whereStr: '',
+        // 不传顶层 whereStr：PDF §2.8（postRelationAggrigateData）请求体无此字段，
+        // §2.7 模型版同样没有（2026-09-25 实测：带 '' 与不传，服务端响应逐字相同）。
+        // 分段过滤语义全部落在 segment[].where_str 上。
         orderByStr: validateMetaFragment(args.order_by_str, 'order_by_str'),
         groupByStr: validateMetaFragment(args.group_by_str, 'group_by_str'),
         pageNum: 1,
@@ -92,8 +94,12 @@ export const queryRelationSegmentTool: AskdataTool = {
         data: described.data,
         page: described.page,
         executionMs: Date.now() - started,
-        ...(itemTotal !== undefined
-          ? { total: itemTotal, complete: described.data.length >= itemTotal }
+        ...(itemTotal !== undefined || described.complete !== undefined
+          ? {
+              ...(itemTotal !== undefined ? { total: itemTotal } : {}),
+              // 显式声明优先（退化形态），否则按"单页即全量"推算
+              complete: described.complete ?? (itemTotal !== undefined && described.data.length >= itemTotal),
+            }
           : {}),
       })
       applyAudit(queryRelationSegmentTool, args, ctx, apiOrSql, result, started, urlLog[0])

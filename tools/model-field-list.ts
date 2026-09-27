@@ -36,12 +36,15 @@ function isModelNotFound(message: string): boolean {
 }
 
 /** model_field_list 工具定义。 */
-/** 安全上限：属性清单理论上界，超出即截断并置 complete=false。 */
-const FIELD_CAP = 300
+/**
+ * 模型可见的预览上界（静态字段读不到 ctx.config）。实际返回行数由部署配置
+ * `query.meta.fieldCap` 决定；此值只需 ≥ 它，配置调大时不会被这里卡住。
+ */
+const FIELD_PREVIEW_LIMIT = 1000
 
 export const modelFieldListTool: AskdataTool = {
   name: 'model_field_list',
-  previewLimit: FIELD_CAP,
+  previewLimit: FIELD_PREVIEW_LIMIT,
   description:
     '查询一个模型的基本属性（字段构成）：返回该模型的全部可用属性名、描述与类型码。'
     + '输入中文模型名（如 设备参数列模型、水泵模型、水库模型；也接受 class_path 形态）。'
@@ -86,7 +89,8 @@ export const modelFieldListTool: AskdataTool = {
         env = parseAgpEnvelope(text)
       }
 
-      const data: Record<string, unknown>[] = env.rows.slice(0, FIELD_CAP).map((row, i) => ({
+      const fieldCap = ctx.config.query.meta.fieldCap
+      const data: Record<string, unknown>[] = env.rows.slice(0, fieldCap).map((row, i) => ({
         rank: i + 1,
         field_name: String(row.field_name ?? ''),
         field_description: String(row.field_description ?? ''),
@@ -109,7 +113,7 @@ export const modelFieldListTool: AskdataTool = {
         data,
         executionMs: Date.now() - started,
         total: env.rows.length,
-        complete: env.rows.length <= FIELD_CAP,
+        complete: env.rows.length <= fieldCap,
       })
       applyAudit(modelFieldListTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result

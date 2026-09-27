@@ -92,6 +92,8 @@ export const Config = z.object({
         .description('关系数多于此值时渲染指引切换为"直接展开 + 间接按中继模型聚合计数"（仅中文模型名入参时 direct 判定可信；配 0 = 永不切换）'),
       defaultPageSize: z.number().default(100).min(1)
         .description('meta 查询族（query_model / query_model_segment / query_relation_segment）未传 page_size 时的默认单页行数'),
+      fieldCap: z.number().default(300).min(1)
+        .description('字段构成清单（model_field_list / relation_field_list）的安全截断上限：超出即截断并置 complete=false'),
     }).collapse().description('meta 元数据面阈值（AGP 数据底座 meta 接口工具族）'),
     useAggregateTable: z.boolean().default(true)
       .description('是否使用 WT_CUBE 预聚合路由：开启后 aggregate 对 1H/1D/1M/1Y 粒度 tag 自动查聚合表（快）；关闭 = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),

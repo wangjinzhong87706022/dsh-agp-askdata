@@ -12,6 +12,7 @@ import type { ToolContext } from '../tools/types.ts'
 import { queryModelTool } from '../tools/query-model.ts'
 import { queryModelSegmentTool } from '../tools/query-model-segment.ts'
 import { queryRelationSegmentTool } from '../tools/query-relation-segment.ts'
+import { modelFieldListTool } from '../tools/model-field-list.ts'
 import { relationFieldListTool } from '../tools/relation-field-list.ts'
 import { modelRelationGraphTool } from '../tools/model-relation-graph.ts'
 import { describeEnvelope, resultFieldType } from '../tools/meta-common.ts'
@@ -354,5 +355,55 @@ describe('class_alias 白名单（B2：反斜杠可击穿引号倍增，故走�
     })
     const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
     expect(res.success).toBe(true)
+  })
+})
+
+describe('fieldCap 走部署配置（①）', () => {
+  const ATTRS_400 = {
+    code: 0, message: 'success',
+    data: {
+      field: [{ name: 'field_name', title: '属性名称', type: '3' }],
+      data: Array.from({ length: 400 }, (_, i) => ({ field_name: `f${i}` })),
+    },
+  }
+  const ctxWith = (fetchImpl: (u: string | URL | Request) => Promise<Response>, meta: Record<string, number>) => {
+    const config = resolveConfig({
+      connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
+      query: {
+        rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 },
+        meta: meta as never,
+      },
+    })
+    const executor = { execute: async () => ({ columns: [], rows: [] }) }
+    return { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as typeof fetch }
+  }
+
+  it('默认 fieldCap=300：400 属性被截断且 complete=false', async () => {
+    const res = await modelFieldListTool.run(
+      { model_name: 'X' },
+      ctxWith(async () => jsonResponse(ATTRS_400), {}),
+    )
+    expect(res.total).toBe(400)
+    expect(res.complete).toBe(false)
+    expect(res.data).toHaveLength(300)
+  })
+
+  it('配置 fieldCap=50：截断到 50 行，仍 complete=false', async () => {
+    const res = await modelFieldListTool.run(
+      { model_name: 'X' },
+      ctxWith(async () => jsonResponse(ATTRS_400), { fieldCap: 50 }),
+    )
+    expect(res.data).toHaveLength(50)
+    expect(res.total).toBe(400)
+    expect(res.complete).toBe(false)
+  })
+
+  it('配置 fieldCap=500：不截断，complete=true', async () => {
+    const res = await modelFieldListTool.run(
+      { model_name: 'X' },
+      ctxWith(async () => jsonResponse(ATTRS_400), { fieldCap: 500 }),
+    )
+    expect(res.data).toHaveLength(400)
+    expect(res.complete).toBe(true)
   })
 })

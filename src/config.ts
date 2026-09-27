@@ -86,6 +86,11 @@ export interface MetaQueryLimits {
   groupedHintThreshold: number
   /** meta 查询族（query_model / *_segment 等）未显式传 page_size 时的默认单页行数。 */
   defaultPageSize: number
+  /**
+   * 字段构成清单（model_field_list / relation_field_list）的安全截断上限：
+   * 超出即截断并置 `complete=false`。建模属性理论上远小于此。
+   */
+  fieldCap: number
 }
 
 /** 系统护栏与阈值。 */
@@ -317,7 +322,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     tsdbChannel: 'sql',
     rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true, maxPageSize: 1000 },
     // meta 面阈值：关系图谱安全上限 / 分组渲染阈值 / 默认单页行数。
-    meta: { relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100 },
+    meta: { relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 },
     useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
@@ -441,6 +446,7 @@ export function resolveConfig(input: AskdataConfigInput): AskdataConfig {
   assertPositiveInt(query.rest.maxPageSize, 'query.rest.maxPageSize')
   assertPositiveInt(query.meta.relationCap, 'query.meta.relationCap')
   assertPositiveInt(query.meta.defaultPageSize, 'query.meta.defaultPageSize')
+  assertPositiveInt(query.meta.fieldCap, 'query.meta.fieldCap')
   // groupedHintThreshold 允许 0（"永不切换分组指引" 是合法部署），只校验整数形态。
   if (!Number.isInteger(query.meta.groupedHintThreshold) || query.meta.groupedHintThreshold < 0) {
     throw new Error(`配置错误：query.meta.groupedHintThreshold 必须是 ≥0 的整数，收到: ${String(query.meta.groupedHintThreshold)}`)

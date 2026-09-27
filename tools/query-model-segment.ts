@@ -82,8 +82,12 @@ export const queryModelSegmentTool: AskdataTool = {
         data: described.data,
         page: described.page,
         executionMs: Date.now() - started,
-        ...(itemTotal !== undefined
-          ? { total: itemTotal, complete: described.data.length >= itemTotal }
+        ...(itemTotal !== undefined || described.complete !== undefined
+          ? {
+              ...(itemTotal !== undefined ? { total: itemTotal } : {}),
+              // 显式声明优先（退化形态），否则按"单页即全量"推算
+              complete: described.complete ?? (itemTotal !== undefined && described.data.length >= itemTotal),
+            }
           : {}),
       })
       applyAudit(queryModelSegmentTool, args, ctx, apiOrSql, result, started, urlLog[0])

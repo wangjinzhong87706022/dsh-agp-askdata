@@ -30,6 +30,12 @@ export interface DescribedEnvelope {
   fields: ResultField[]
   data: Record<string, unknown>[]
   page?: PageInfo
+  /**
+   * 完整性覆盖：仅在退化形态（notice 行）显式给出 `false`——那里 data 不是
+   * 真实数据行，若交给 `rowCount >= total` 推算会碰巧得到同样的 false，
+   * 但那是巧合而非声明（notice 行数 1 与 total 无关）。
+   */
+  complete?: boolean
 }
 
 /**
@@ -62,6 +68,7 @@ export function describeEnvelope(env: AgpEnvelope): DescribedEnvelope {
           + '这通常是接口契约变更或服务端异常。请如实说明，不要编造属性或数据。',
       }],
       ...(page !== undefined ? { page } : {}),
+      complete: false,
     }
   }
   const data = env.rows.map((row) => {

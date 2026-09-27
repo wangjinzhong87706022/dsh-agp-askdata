@@ -201,7 +201,7 @@ describe('model_relation_graph', () => {
     expect(modelRelationGraphTool.previewLimit as number).toBeGreaterThan(5)
   })
 
-  it('class_path 入参：direct 判定不可信，标"未知"且不给直接/间接分组指引（L6）', async () => {
+  it('class_path 入参：direct 判定不可信，标"无法判定"且不给直接/间接分组指引（L6）', async () => {
     const manyRows = Array.from({ length: 45 }, (_, i) => ({
       relation_name: `r${i}`,
       relation_description: `关系${i}`,
@@ -215,12 +215,12 @@ describe('model_relation_graph', () => {
       ctxOf(fetchImpl as unknown as typeof fetch),
     )
     expect(res.success).toBe(true)
-    expect(res.data[0]!.direct).toBe('未知')
+    expect(res.data[0]!.direct).toBe('无法判定')
     const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
     // 不能出现"直接 0 条 + 间接 45 条"这类基于不可信 direct 的分组结论
     expect(hint).not.toContain('直接 0 条')
     expect(hint).not.toContain('按中继模型')
-    expect(hint).toContain('direct 列一律为"未知"')
+    expect(hint).toContain('direct 列一律为"无法判定"')
   })
 
   it('恰好 300 条关系：渲染指引行不被预览截断吞掉（H1）', async () => {

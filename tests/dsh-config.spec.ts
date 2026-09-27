@@ -115,7 +115,7 @@ describe('配置页默认值可装配', () => {
 
   it('meta 面阈值与预览缺省行数随配置下发，缺省值与文档一致', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    expect(service.config.query.meta).toEqual({ relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100 })
+    expect(service.config.query.meta).toEqual({ relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 })
     expect(service.config.system.defaultPreviewLimit).toBe(20)
   })
 
@@ -123,7 +123,7 @@ describe('配置页默认值可装配', () => {
     const cfg = defaultConfig()
     cfg.query.meta = { ...cfg.query.meta, relationCap: 50 }
     const service = createAskdataService(toRuntimeConfig(cfg))
-    expect(service.config.query.meta).toEqual({ relationCap: 50, groupedHintThreshold: 40, defaultPageSize: 100 })
+    expect(service.config.query.meta).toEqual({ relationCap: 50, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 })
   })
 
   it('阈值加载期校验：maxPageSize / meta 阈值 / 预览缺省必须是 ≥1 整数', () => {

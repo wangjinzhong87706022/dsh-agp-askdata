@@ -201,7 +201,7 @@ function renderHintRow(
       `同组多条时在名字后带计数（如"对端模型A ×3"）。间接关系不要逐条平铺。`
     : `data 构造规则：第二层 = 关系名（relation_description），叶子 = 对端模型（rightModelName）；` +
       `同一对端模型多条关系时合并到一个关系节点。` +
-      (directReliable ? '' : `注意：本次以 class_path 入参，接口返回的是中文端点名，无法判定哪些关系是直接关系，direct 列一律为"未知"——不要按直接/间接分组。`)
+      (directReliable ? '' : `注意：本次以 class_path 入参，接口返回的是中文端点名，无法判定哪些关系是直接关系，direct 列一律为"无法判定"——不要按直接/间接分组。`)
   const drillProtocol =
     `双击图上任意节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
     `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
@@ -303,7 +303,7 @@ export const modelRelationGraphTool: AskdataTool = {
         rightModelName: String(row.rightModelName ?? ''),
         // 直接关系 = 查询模型本身是这条关系的端点；其余为经链路展开的间接关系。
         direct: !directKnown
-          ? '未知'
+          ? '无法判定'
           : String(row.leftModelName ?? '') === modelName || String(row.rightModelName ?? '') === modelName
             ? '是'
             : '否',

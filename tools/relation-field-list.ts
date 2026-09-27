@@ -23,12 +23,15 @@ const FIELDS: ResultField[] = [
 ]
 
 /** relation_field_list 工具定义。 */
-/** 安全上限：关系属性清单理论上界，超出即截断并置 complete=false。 */
-const RELATION_FIELD_CAP = 300
+/**
+ * 模型可见的预览上界（静态字段读不到 ctx.config）。实际返回行数由部署配置
+ * `query.meta.fieldCap` 决定；此值只需 ≥ 它，配置调大时不会被这里卡住。
+ */
+const FIELD_PREVIEW_LIMIT = 1000
 
 export const relationFieldListTool: AskdataTool = {
   name: 'relation_field_list',
-  previewLimit: RELATION_FIELD_CAP,
+  previewLimit: FIELD_PREVIEW_LIMIT,
   description:
     '查询一个模型关系的基本属性（关系里可用的字段清单，含所属模型）。'
     + '输入中文关系名称（如 设备参数列表、组织和用户的关系；可从 model_relation_graph '
@@ -61,7 +64,8 @@ export const relationFieldListTool: AskdataTool = {
       const text = await agpGet(ctx, metaBase, `/getRelationBasAttributes?relationName=${encodeURIComponent(relationName)}`)
       const env = parseAgpEnvelope(text)
 
-      const data: Record<string, unknown>[] = env.rows.slice(0, RELATION_FIELD_CAP).map((row, i) => ({
+      const fieldCap = ctx.config.query.meta.fieldCap
+      const data: Record<string, unknown>[] = env.rows.slice(0, fieldCap).map((row, i) => ({
         rank: i + 1,
         field_name: String(row.field_name ?? ''),
         field_description: String(row.field_description ?? ''),
@@ -86,7 +90,7 @@ export const relationFieldListTool: AskdataTool = {
         data,
         executionMs: Date.now() - started,
         total: env.rows.length,
-        complete: env.rows.length <= RELATION_FIELD_CAP,
+        complete: env.rows.length <= fieldCap,
       })
       applyAudit(relationFieldListTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result
