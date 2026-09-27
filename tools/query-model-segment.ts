@@ -17,6 +17,8 @@ import { agpPost, describeEnvelope, parseSegments, resolvePageSize, validateMeta
 /** query_model_segment 工具定义。 */
 export const queryModelSegmentTool: AskdataTool = {
   name: 'query_model_segment',
+  // 单页本就 ≤ maxPageSize(1000)，全量可见；缺省 20 行预览会与 complete=true 自相矛盾
+  previewLimit: 1000,
   description:
     '查询模型数据的分段聚合统计（每段独立按条件计算聚合值，输出一张表）。'
     + '适合"按区间/分类分段统计"类问题（如按参数类型分组计数）。'

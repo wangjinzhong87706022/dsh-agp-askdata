@@ -193,7 +193,9 @@ function renderHintRow(
 ): Record<string, unknown> {
   // direct 判定不可信（class_path 入参，见 run 内的 directKnown）时不给"直接/间接"
   // 分组指引：按不可信的 direct 聚合会输出"直接 0 条 + 间接 N 条"的错误结论。
-  const grouped = directReliable && relationCount > groupedHintThreshold
+  // groupedHintThreshold 配 0 = 永不切换（settings 页与速查表的承诺）；
+  // 漏掉 >0 守卫会让 0 变成"永远切换"（n>0 恒真）。
+  const grouped = directReliable && groupedHintThreshold > 0 && relationCount > groupedHintThreshold
   const dataRule = grouped
     ? `data 构造规则（本模型 ${relationCount} 条 = 直接 ${directCount} 条 + 间接 ${relationCount - directCount} 条）：` +
       `① direct=是 的每条关系各一个第二层节点（节点名 = relation_description，叶子 = 对端模型）；` +

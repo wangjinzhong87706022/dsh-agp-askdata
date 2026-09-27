@@ -216,3 +216,28 @@ describe('adaptAskdataTool', () => {
     expect(view.title).toContain('告警')
   })
 })
+
+describe('render 层完整性收口（H-2：截断即 complete=false）', () => {
+  const value = (over: Partial<Record<string, unknown>>): unknown => ({
+    success: true, toolName: 'query_model', apiOrSql: 'POST x', fields: [],
+    data: Array.from({ length: 25 }, (_, i) => ({ id: i })), rowCount: 25,
+    executionMs: 1, auditId: 'a', ...over,
+  })
+
+  it('截断时强制 complete=false（即使数据端声明 true）', () => {
+    const text = renderAskdataResult(value({ total: 25, complete: true }) as never, 20)
+    expect(text).toContain('"complete": false')
+    expect(text).toContain('truncatedPreview')
+  })
+
+  it('未截断时保留数据端的 complete 判定', () => {
+    const text = renderAskdataResult(value({ total: 25, complete: true }) as never, 100)
+    expect(text).toContain('"complete": true')
+    expect(text).not.toContain('truncatedPreview')
+  })
+
+  it('无 total 且未截断：complete 缺省不出现（不给模型无依据的信号）', () => {
+    const text = renderAskdataResult(value({}) as never, 100)
+    expect(text).not.toContain('"complete"')
+  })
+})

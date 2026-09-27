@@ -248,6 +248,31 @@ describe('model_relation_graph', () => {
     expect(text).toContain('【树形图渲染指引】')
   })
 
+  it('groupedHintThreshold=0 = 永不切换分组（H-1：文档语义与实现对齐）', async () => {
+    const manyRows = Array.from({ length: 45 }, (_, i) => ({
+      relation_name: `r${i}`, relation_description: `关系${i}`,
+      leftModelName: i === 0 ? '水泵模型' : '设备基础模型', rightModelName: `对端${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
+    })
+    const config = resolveConfig({
+      connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
+      query: {
+        rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 },
+        meta: { groupedHintThreshold: 0 },
+      },
+    })
+    const executor = { execute: async () => ({ columns: [], rows: [] }) }
+    const ctx = { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as unknown as typeof fetch }
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctx)
+    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
+    expect(hint).not.toContain('直接 1 条')  // 分组文案特有
+    expect(hint).not.toContain('按中继模型')
+    expect(hint).toContain('data 构造规则：第二层 = 关系名')  // 普通规则文案
+  })
+
   it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => jsonResponse(RELATION_ENVELOPE))
     const res = await modelRelationGraphTool.run(

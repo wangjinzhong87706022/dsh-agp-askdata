@@ -18,6 +18,8 @@ import { agpPost, describeEnvelope, parseSegments, resolvePageSize, validateMeta
 /** query_relation_segment 工具定义。 */
 export const queryRelationSegmentTool: AskdataTool = {
   name: 'query_relation_segment',
+  // 单页本就 ≤ maxPageSize(1000)，全量可见；缺省 20 行预览会与 complete=true 自相矛盾
+  previewLimit: 1000,
   description:
     '查询关系数据的分段聚合统计（每段独立按条件计算聚合值，输出一张表）。'
     + '需先知道关系名称（如"设备参数列表"、"组织和用户的关系"，可从 '

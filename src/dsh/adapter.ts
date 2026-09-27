@@ -72,13 +72,21 @@ export function toParametersJsonSchema(input: Record<string, unknown>): Record<s
  * 而不是盲目翻页。complete 的缺省语义与 `toValue` 一致：`rowCount >= total`。
  */
 export function renderAskdataResult(value: AskdataToolValue, previewLimit: number): string {
+  // 完整性契约收口：预览截断时模型看不到全部行，complete 必须为 false——
+  // 否则"complete:true + 仅展示前 N 行"会让模型给出自信的错答案。数据端
+  // （ToolResult.complete）无需感知预览上限，两端契约在此单点收口。
+  const truncated = value.data.length > previewLimit
+  const complete = truncated
+    ? false
+    : value.complete ?? (value.total !== undefined ? value.rowCount >= value.total : undefined)
   const head = [
     '```json',
     JSON.stringify(
       {
         toolName: value.toolName,
         rowCount: value.rowCount,
-        ...(value.total !== undefined ? { total: value.total, complete: value.complete ?? value.rowCount >= value.total } : {}),
+        ...(complete !== undefined ? { complete } : {}),
+        ...(value.total !== undefined ? { total: value.total } : {}),
         executionMs: value.executionMs,
         auditId: value.auditId,
         fields: value.fields,

@@ -22,6 +22,8 @@ import { agpPost, describeEnvelope, resolvePageSize, validateMetaFragment, valid
 /** query_model 工具定义。 */
 export const queryModelTool: AskdataTool = {
   name: 'query_model',
+  // 单页本就 ≤ maxPageSize(1000)，全量可见；缺省 20 行预览会与 complete=true 自相矛盾
+  previewLimit: 1000,
   description:
     '查询一个模型的业务数据（模型实例行，如"设备参数列模型里有哪些参数记录"）。'
     + '输入中文模型名 + 显式属性名列表（先用 model_field_list 查该模型可用字段，'
