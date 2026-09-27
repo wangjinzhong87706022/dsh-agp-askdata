@@ -10,6 +10,7 @@
  */
 
 import type { AskdataTool, ToolContext } from '../../tools/index.ts'
+import type { SystemLimits } from '../config.ts'
 import type { ToolResult } from '../result.ts'
 import { askdataError } from '../errors.ts'
 
@@ -61,12 +62,16 @@ export function toParametersJsonSchema(input: Record<string, unknown>): Record<s
   }
 }
 
-/** 工具结果 → 模型/渲染文本（fields + 行预览 + 元信息）。
+/**
+ * 工具结果 → 模型/渲染文本（fields + 行预览 + 元信息）。
  *
- * 预览行数上限由工具自声明（`AskdataTool.previewLimit`，缺省 20）：有界元数据
- * 清单（meta 面）声明更大值——完整清单本身就是答案。total/complete 是完整性
- * 契约：模型据其判断拿到的是不是全部，决定收窄条件或聚合而不是盲目翻页。 */
-export function renderAskdataResult(value: AskdataToolValue, previewLimit = 20): string {
+ * 预览行数上限由工具自声明（`AskdataTool.previewLimit`），未声明时取宿主配置
+ * `system.defaultPreviewLimit`（见 `adaptAskdataTool`）——有界元数据清单（meta 面）
+ * 声明更大值，完整清单本身就是答案。
+ * total/complete 是完整性契约：模型据其判断拿到的是不是全部，决定收窄条件或聚合
+ * 而不是盲目翻页。complete 的缺省语义与 `toValue` 一致：`rowCount >= total`。
+ */
+export function renderAskdataResult(value: AskdataToolValue, previewLimit: number): string {
   const head = [
     '```json',
     JSON.stringify(
@@ -101,10 +106,13 @@ function summarizeArgs(args: unknown): string {
  *
  * @param tool - 框架无关工具（name/description/inputSchema/run）。
  * @param makeContext - 每次调用构造 ToolContext（宿主注入取消信号与审计链游标）。
+ * @param system - 宿主配置 `AskdataConfig.system`：提供未声明 previewLimit 的工具的
+ *   缺省预览行数（阈值收进配置，实现里不再内嵌第二套默认值）。
  */
 export function adaptAskdataTool(
   tool: AskdataTool,
   makeContext: (signal?: AbortSignal) => ToolContext,
+  system: SystemLimits,
 ): AskdataToolDefinition {
   const execute = async (args: unknown, exec: { signal?: AbortSignal }): Promise<unknown> => {
     const result = await tool.run((args ?? {}) as Record<string, unknown>, makeContext(exec?.signal))
@@ -136,7 +144,7 @@ export function adaptAskdataTool(
         required: ['success', 'toolName', 'apiOrSql', 'fields', 'data', 'rowCount', 'executionMs', 'auditId'],
         additionalProperties: false,
       },
-      render: (_args, value) => [{ type: 'text', text: renderAskdataResult(value as AskdataToolValue, tool.previewLimit ?? 20) }],
+      render: (_args, value) => [{ type: 'text', text: renderAskdataResult(value as AskdataToolValue, tool.previewLimit ?? system.defaultPreviewLimit) }],
     },
     presentCall: (args) => ({
       card: 'generic',
@@ -149,7 +157,13 @@ export function adaptAskdataTool(
   } satisfies AskdataToolDefinition
 }
 
-/** ToolResult → canonical 值（剥掉 citations/errorMessage 等非模型面字段）。 */
+/**
+ * ToolResult → canonical 值（剥掉 citations/errorMessage 等非模型面字段）。
+ *
+ * complete 缺省语义（与 `renderAskdataResult` 保持同一套）：声明了 total 时，
+ * `rowCount >= total` 即视为全量；工具显式给了 complete 则以工具为准
+ * （有安全截断的工具必须显式给 false，模型才不会被"看着齐全"骗过去）。
+ */
 function toValue(result: ToolResult): AskdataToolValue {
   return {
     success: result.success,
@@ -160,6 +174,8 @@ function toValue(result: ToolResult): AskdataToolValue {
     rowCount: result.rowCount,
     executionMs: result.executionMs,
     auditId: result.auditId,
-    ...(result.total !== undefined ? { total: result.total, complete: result.complete ?? true } : {}),
+    ...(result.total !== undefined
+      ? { total: result.total, complete: result.complete ?? result.rowCount >= result.total }
+      : {}),
   }
 }

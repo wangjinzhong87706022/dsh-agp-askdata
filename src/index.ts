@@ -10,7 +10,7 @@
  * @module
  */
 
-import { resolveConfig, type AskdataConfig, type StarRocksConnection, type MysqlConnection, type QueryConfig, type DutyConfig } from './config.ts'
+import { resolveConfig, type AskdataConfig, type AskdataConfigInput } from './config.ts'
 import { executeQuery } from './clients/starrocks.ts'
 import { executeQueryViaMysql2 } from './clients/starrocks-mysql2.ts'
 import { executeQueryViaMysql } from './clients/mysql-mysql2.ts'
@@ -55,19 +55,7 @@ function gate(executor: SqlExecutor, tableWhitelist: string[]): SqlExecutor {
  * `mysqlConnection` 可留空：P0 纯 TSDB 部署不受影响，P1 元数据/告警工具在
  * 调用期收到明确的 BACKEND_DOWN 提示。
  */
-export function createAskdataService(input: {
-  connection: StarRocksConnection
-  mysqlConnection?: Partial<MysqlConnection>
-  appId?: number
-  tables?: Partial<AskdataConfig['tables']>
-  query?: Partial<QueryConfig>
-  system?: Partial<AskdataConfig['system']>
-  security?: Partial<AskdataConfig['security']>
-  audit?: Partial<AskdataConfig['audit']>
-  knowledge?: Partial<AskdataConfig['knowledge']>
-  duty?: Partial<DutyConfig>
-  toolsets?: Partial<AskdataConfig['toolsets']>
-}): AskdataService {
+export function createAskdataService(input: AskdataConfigInput): AskdataService {
   const config = resolveConfig(input)
   // 知识面客户端：datasetIds 为空时不装配（知识工具调用期明确报错），
   // 取数面不受影响（P0 纯 TSDB 部署无 RAGFlow 也能跑）。

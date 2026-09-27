@@ -1,7 +1,7 @@
 /**
  * askdata skill 行（`dsh-agp-askdata/skills`）：
- * 把 18 个工具的使用手册按"问数工作流 + 值班报告工作流"聚合为 5 个可召回的 skill，
- * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 18 个工具的 schema。
+ * 把 24 个工具的使用手册按"问数工作流 + 值班报告工作流"聚合为 6 个可召回的 skill，
+ * 让用户/模型在面对复杂问题时按需加载详细指引，不必每次都看见 24 个工具的 schema。
  *
  * 设计：
  * - 聚合而非一对一：一个 skill = 一类问题的工作流（不是单个工具的说明书），符合
@@ -124,7 +124,7 @@ Y = 年聚合（1Y 走 WT_CUBE）
   {
     name: 'askdata-query-pattern',
     description: '典型问数工作流：从自然语言到工具调用的标准 5 步模板。',
-    whenToUse: '面对一个新查询不知道先调哪个工具、不知道参数怎么填、需要把 16 个工具串成可复用流水线时调用。',
+    whenToUse: '面对一个新查询不知道先调哪个工具、不知道参数怎么填、需要把 24 个工具串成可复用流水线时调用。',
     content: `# 问数工作流标准模板
 
 ## 1. 五步问数流程
@@ -196,11 +196,16 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | \`query.tsdbChannel\` | \`sql\` | latest_value 取数通道 | 网关可用时改 \`rest\` |
 | \`query.rest.{baseUrl,wtAppid,wtToken,wtOpenid}\` | 全空 | TSDB 网关鉴权 | 启用 rest 时必填 |
 | \`query.rest.fallbackToSql\` | \`true\` | REST 失败回落 SQL | 网关不稳定时关闭以快速失败 |
+| \`query.rest.maxPageSize\` | \`1000\` | meta 查询单页行数上限（AGP 要求 <1000） | 压上下文时调小 |
+| \`query.meta.relationCap\` | \`300\` | model_relation_graph 关系清单安全截断上限 | 关系极多的模型可调高 |
+| \`query.meta.groupedHintThreshold\` | \`40\` | 关系数多于此值时渲染指引切换为"直接展开 + 间接聚合" | 配 0 = 永不切换 |
+| \`query.meta.defaultPageSize\` | \`100\` | meta 查询族未传 page_size 时的默认单页行数 | 压上下文时调小 |
 | \`query.useAggregateTable\` | \`true\` | 是否启用 WT_CUBE 路由 | 非光伏行业/口径存疑时关闭 |
 | \`query.aggregateTable\` | \`WT_CUBE\` | 预聚合表名 | 集群无 cube 时置空 |
 | \`query.cubeTypeMapJson\` | 1-20 光伏 cubeType 映射 | 影响路由解释 | 多行业切换时改 |
 | \`query.granularityMapJson\` | 1H=1,1D=2,1M=3,1Y=4 | 粒度→granularity 值 | WT_CUBE 列不变则不改 |
 | \`system.queryTimeoutMs\` | \`15000\` | 单条 SQL 超时 | 联调库波动时改 30000 |
+| \`system.defaultPreviewLimit\` | \`20\` | 工具未自声明 previewLimit 时的模型可见预览行数 | 大结果面调高 |
 | \`system.maxScanRows\` | \`1e8\` | 扫描护栏 | WT_DATA 全表场景调高 |
 | \`system.timeZone\` | \`+08:00\` | 时间字面量偏移换算 | 仅接受 ±HH:MM |
 | \`security.tableWhitelist\` | WT_TAG/WT_DATA/WT_CUBE/WT_DEVICE | 基础库白名单 | 加新表时追加 |
@@ -209,7 +214,10 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | \`knowledge.ragflowApiKey\` | 空（回退环境变量 RAGFLOW_API_KEY） | 知识面 Bearer 凭据 | 生产必须配 |
 | \`knowledge.datasetIds\` | 空（知识工具不可用） | 知识检索目标数据集 | 启用知识面必填 |
 | \`knowledge.maxChunks\` / \`knowledge.maxGraphEntities\` | 8 / 60 | 知识面返回量预算 | 上下文吃紧时调小 |
-| \`audit.enabled\` | \`false\` | 审计哈希链启用 | 上线时开 |
+| \`toolsets.sql\` | \`true\` | 内网 SQL 取数面（12 工具） | 云端 API 部署关掉 |
+| \`toolsets.api\` | \`true\` | AGP API 面（8 工具：值班报告 2 + meta 元数据 6） | 无网关时关掉 |
+| \`toolsets.knowledge\` | \`true\` | RAGFlow 知识面（4 工具） | 不接 RAGFlow 时关掉 |
+| \`audit.enabled\` | \`true\` | 审计哈希链启用（进程内行构建 + 游标；落库为 P2） | 无旁路写账号时关掉 |
 
 ## 3. 安全红线
 

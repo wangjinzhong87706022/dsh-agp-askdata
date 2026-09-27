@@ -52,6 +52,22 @@ describe('ASKDATA_SKILLS 常量', () => {
   it('assertAskdataSkillShape 加载期 fail loud', () => {
     expect(() => assertAskdataSkillShape()).not.toThrow()
   })
+
+  it('askdata-config 速查表收录当前全部可调开关（新增配置项必须补进 skill）', () => {
+    const config = ASKDATA_SKILLS.find((s) => s.name === 'askdata-config')!
+    for (const key of [
+      'query.rest.maxPageSize',
+      'query.meta.relationCap',
+      'query.meta.groupedHintThreshold',
+      'query.meta.defaultPageSize',
+      'system.defaultPreviewLimit',
+      'toolsets.sql',
+      'toolsets.api',
+      'toolsets.knowledge',
+    ]) {
+      expect(config.content, key).toContain(key)
+    }
+  })
 })
 
 describe('askdata-skills cordis 行形态', () => {

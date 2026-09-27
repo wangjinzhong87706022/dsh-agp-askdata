@@ -48,10 +48,16 @@ const RELATION_ENVELOPE = {
   },
 }
 
-function ctxOf(fetchImpl: (url: string | URL | Request) => Promise<Response>): ToolContext {
+function ctxOf(
+  fetchImpl: (url: string | URL | Request) => Promise<Response>,
+  meta?: Partial<{ relationCap: number; groupedHintThreshold: number }>,
+): ToolContext {
   const config = resolveConfig({
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
-    query: { rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 } },
+    query: {
+      rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 },
+      ...(meta ? { meta } : {}),
+    },
   })
   const executor = { execute: async () => ({ columns: [], rows: [] }) }
   return { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as typeof fetch }
@@ -65,15 +71,20 @@ describe('metaBaseUrl', () => {
 })
 
 describe('decodeAgpEnvelope helpers', () => {
-  it('decodeAgpBody：UTF-8 严格解码失败回退 GBK', () => {
-    const gbkBytes = new TextDecoder('utf-8').decode(new Uint8Array([0xb4, 0xed])) // GBK "错"
-    // 直接构造 GBK 字节：'错' = 0xB4ED, UTF-8 严格解码必失败
-    const bytes = new TextEncoder().encode('{"message":"plain"}')
-    expect(decodeAgpBody(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))).toContain('plain')
-    // GBK 有效序列（0xB4 0xED = '错'）
+  it('decodeAgpBody：UTF-8 严格解码失败回退 GBK，且真解出汉字', () => {
+    // 合法 UTF-8：走严格解码主路，不触发回退
+    const utf8 = new TextEncoder().encode('{"message":"plain"}')
+    expect(decodeAgpBody(utf8.buffer.slice(utf8.byteOffset, utf8.byteOffset + utf8.byteLength))).toContain('plain')
+
+    // GBK 字节：0x7B 0x7D = "{}"，0xB4 0xED = "错"（UTF-8 严格解码必失败）
+    // 手写字节而非 iconv-lite：TextEncoder 只支持 UTF-8，而 '错' 的 GBK 码位是
+    // 固定的两字节常量，直接写死比引入编码依赖更可读也更可移植。
     const gbkBuffer = new Uint8Array([0x7b, 0x7d, 0xb4, 0xed]).buffer
     expect(() => new TextDecoder('utf-8', { fatal: true }).decode(gbkBuffer)).toThrow()
-    void gbkBytes
+    const gbkText = decodeAgpBody(gbkBuffer)
+    expect(gbkText).toBe('{}错')
+    // 回退结果不含替换字符——说明确实被 GBK 解码器认领，而不是被 UTF-8 兜底糊弄
+    expect(gbkText).not.toContain('�')
   })
   it('parseAgpEnvelope：code 字符串/数字双形态、message/msg 双字段', () => {
     expect(parseAgpEnvelope('{"code":0,"message":"ok","data":{"field":[],"data":[]}}').code).toBe(0)
@@ -147,6 +158,71 @@ describe('model_relation_graph', () => {
     expect(hint).toContain('经XX链路')
   })
 
+  it('分组渲染阈值走 config.query.meta.groupedHintThreshold', async () => {
+    const manyRows = Array.from({ length: 45 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: i === 0 ? '直接关系甲' : `间接关系${i}`,
+      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
+      rightModelName: i === 0 ? '设备基础模型' : `对端模型${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
+    })
+    // 阈值调到 100 → 45 条不再触发分组指引
+    const res = await modelRelationGraphTool.run(
+      { model_name: '水泵模型' },
+      ctxOf(fetchImpl as unknown as typeof fetch, { groupedHintThreshold: 100 }),
+    )
+    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
+    expect(hint).not.toContain('按中继模型')
+    expect(hint).toContain('第二层 = 关系名')
+  })
+
+  it('安全截断上限走 config.query.meta.relationCap（超出即 complete=false）', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: `关系${i}`,
+      leftModelName: '设备基础模型',
+      rightModelName: `对端${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: rows } })
+    })
+    const res = await modelRelationGraphTool.run(
+      { model_name: '水泵模型' },
+      ctxOf(fetchImpl as unknown as typeof fetch, { relationCap: 5 }),
+    )
+    expect(res.total).toBe(12)
+    expect(res.complete).toBe(false)
+    expect(res.rowCount).toBe(6) // 5 条截断 + 1 行渲染指引
+    // 预览上限恒 ≥ 生效截断上限 + 指引行：产出行数不会把指引行挤出模型可见面
+    expect(modelRelationGraphTool.previewLimit as number).toBeGreaterThan(5)
+  })
+
+  it('class_path 入参：direct 判定不可信，标"未知"且不给直接/间接分组指引（L6）', async () => {
+    const manyRows = Array.from({ length: 45 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: `关系${i}`,
+      leftModelName: '设备基础模型',
+      rightModelName: `对端模型${i}`,
+    }))
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } }))
+    const res = await modelRelationGraphTool.run(
+      { model_name: 'wt_elm_equipment/wt_10462_shuibengmoxing' },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res.success).toBe(true)
+    expect(res.data[0]!.direct).toBe('未知')
+    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
+    // 不能出现"直接 0 条 + 间接 45 条"这类基于不可信 direct 的分组结论
+    expect(hint).not.toContain('直接 0 条')
+    expect(hint).not.toContain('按中继模型')
+    expect(hint).toContain('direct 列一律为"未知"')
+  })
+
   it('恰好 300 条关系：渲染指引行不被预览截断吞掉（H1）', async () => {
     const rows = Array.from({ length: 300 }, (_, i) => ({
       relation_name: `r${i}`,
@@ -167,7 +243,7 @@ describe('model_relation_graph', () => {
       success: true, toolName: 'model_relation_graph', apiOrSql: '', fields: [],
       data: res.data, rowCount: res.rowCount, executionMs: 1, auditId: '',
       total: res.total, complete: res.complete,
-    }, modelRelationGraphTool.previewLimit)
+    }, modelRelationGraphTool.previewLimit as number)
     expect(text).not.toContain('truncatedPreview')
     expect(text).toContain('【树形图渲染指引】')
   })

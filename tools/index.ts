@@ -61,7 +61,7 @@ export const p1Tools: AskdataTool[] = [
 
 /**
  * P2 subagent-style 工具：自然语言问数入口（自动流水线 + 溯源）。
- * 工具面与 P0/P1 互斥：模型可视 12 个工具时倾向走基础工具 + 自己编排；
+ * 工具面与 P0/P1 互斥：模型可见工具多（24 个）时倾向走基础工具 + 自己编排；
  * 用户/简单场景倾向本工具"一答到底"。
  */
 export const subagentTools: AskdataTool[] = [

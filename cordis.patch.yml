@@ -2,8 +2,10 @@
 #
 # P0 ships the TSDB (StarRocks) tool surface; P1 adds the MySQL metadata/alarm
 # tools; P2 adds the RAGFlow knowledge surface (graph / wiki / chunk retrieval,
-# 4 tools) and the flood duty-report surface (list_duty_stations +
-# generate_duty_report) — 18 tools in total, incl. the subagent-style
+# 4 tools), the flood duty-report surface (list_duty_stations +
+# generate_duty_report) and the AGP meta surface (model_relation_graph,
+# model_field_list, relation_field_list, query_model, query_model_segment,
+# query_relation_segment) — 24 tools in total, incl. the subagent-style
 # askdata_deep_analysis. The `askdata` row mounts the plugin service (config,
 # clients, validation gate, audit chain).
 #

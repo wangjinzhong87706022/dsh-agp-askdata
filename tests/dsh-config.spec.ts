@@ -3,8 +3,11 @@
  * @module
  */
 
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Config, toRuntimeConfig, parseJsonMapField } from '../src/dsh/plugin.ts'
+import { Config, toRuntimeConfig, parseJsonMapField, installPreset } from '../src/dsh/plugin.ts'
 import { createAskdataService } from '../src/index.ts'
 import { DEFAULT_CUBE_TYPE_MAP } from '../src/config.ts'
 
@@ -108,6 +111,39 @@ describe('配置页默认值可装配', () => {
     expect(cfg.mysqlConnection.host).toBe('')
     expect(cfg.connection.user).toBe('askdata_ro')
     expect(() => Config(null)).toThrow()
+  })
+
+  it('meta 面阈值与预览缺省行数随配置下发，缺省值与文档一致', () => {
+    const service = createAskdataService(toRuntimeConfig(defaultConfig()))
+    expect(service.config.query.meta).toEqual({ relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100 })
+    expect(service.config.system.defaultPreviewLimit).toBe(20)
+  })
+
+  it('meta 面阈值可被部署配置覆盖（部分覆盖时其余取默认）', () => {
+    const cfg = defaultConfig()
+    cfg.query.meta = { ...cfg.query.meta, relationCap: 50 }
+    const service = createAskdataService(toRuntimeConfig(cfg))
+    expect(service.config.query.meta).toEqual({ relationCap: 50, groupedHintThreshold: 40, defaultPageSize: 100 })
+  })
+
+  it('阈值加载期校验：maxPageSize / meta 阈值 / 预览缺省必须是 ≥1 整数', () => {
+    const conn = { host: 'fe.example.com', port: 9030, user: 'u', password: 'p', database: 'WT_DB' }
+    const rest = { baseUrl: '', wtAppid: '', wtOpenid: '', wtToken: '', fallbackToSql: true, maxPageSize: 1000 }
+    expect(() => createAskdataService({ connection: conn, query: { rest: { ...rest, maxPageSize: 0 } } }))
+      .toThrow(/query\.rest\.maxPageSize 必须是 ≥1 的整数/)
+    expect(() => createAskdataService({ connection: conn, query: { rest: { ...rest, maxPageSize: 1.5 } } }))
+      .toThrow(/query\.rest\.maxPageSize/)
+    expect(() => createAskdataService({ connection: conn, query: { meta: { relationCap: 0 } } }))
+      .toThrow(/query\.meta\.relationCap/)
+    expect(() => createAskdataService({ connection: conn, query: { meta: { defaultPageSize: -1 } } }))
+      .toThrow(/query\.meta\.defaultPageSize/)
+    expect(() => createAskdataService({ connection: conn, query: { meta: { groupedHintThreshold: -1 } } }))
+      .toThrow(/query\.meta\.groupedHintThreshold/)
+    // groupedHintThreshold = 0 是合法部署（永不切换分组指引）
+    expect(createAskdataService({ connection: conn, query: { meta: { groupedHintThreshold: 0 } } })
+      .config.query.meta.groupedHintThreshold).toBe(0)
+    expect(() => createAskdataService({ connection: conn, system: { defaultPreviewLimit: 0 } }))
+      .toThrow(/system\.defaultPreviewLimit/)
   })
 
   it('审计哈希链默认开启（进程内行构建；落库为 P2）', () => {
@@ -217,5 +253,47 @@ describe('工具组开关（toolsets）', () => {
     expect(names).toHaveLength(12) // P0 五 + P1 六 + deep_analysis
     expect(names).not.toContain('model_relation_graph')
     expect(names).not.toContain('knowledge_search')
+  })
+})
+
+describe('installPreset 的 presetId 白名单（路径插值防护）', () => {
+  function ctxWithLogs(): { ctx: never; warns: Array<{ msg: string; args: unknown[] }> } {
+    const warns: Array<{ msg: string; args: unknown[] }> = []
+    const ctx = {
+      logger: {
+        info: () => {},
+        warn: (msg: string, ...args: unknown[]) => { warns.push({ msg, args }) },
+      },
+    } as never
+    return { ctx, warns }
+  }
+
+  it('非法 presetId 跳过安装并告警（告警带实际 presetId），不抛异常打断启动', async () => {
+    for (const bad of ['../evil', 'Askdata', 'a/b', '', '1abc', 'a'.repeat(42)]) {
+      const { ctx, warns } = ctxWithLogs()
+      await expect(installPreset(ctx, bad)).resolves.toBe(false)
+      expect(warns).toHaveLength(1)
+      expect(warns[0]!.msg).toContain('presetId "%s" 非法')
+      expect(warns[0]!.args[0]).toBe(bad) // 告警文案带实际 presetId，而不是硬编码 'askdata'
+    }
+  })
+
+  it('合法 kebab-case 形态通过白名单（真的装进隔离的 DSH_HOME 临时目录）', async () => {
+    // 装到临时 DSH_HOME，绝不碰用户真实的 ~/.dsh；装完即删。
+    const home = mkdtempSync(join(tmpdir(), 'askdata-preset-'))
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = home
+    try {
+      const { ctx, warns } = ctxWithLogs()
+      await expect(installPreset(ctx, 'askdata-api')).resolves.toBe(true)
+      expect(warns).toHaveLength(0)
+      expect(existsSync(join(home, '.agent-presets', 'askdata-api', 'agent.cordis.yml'))).toBe(true)
+      // 幂等：已存在则跳过，不告警
+      await expect(installPreset(ctx, 'askdata-api')).resolves.toBe(false)
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })

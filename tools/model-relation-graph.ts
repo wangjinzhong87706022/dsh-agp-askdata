@@ -37,11 +37,6 @@ const FIELDS: ResultField[] = [
   { name: 'direct', title: '直接关系', type: 'string' },
 ]
 
-/** 安全上限：超过即截断并置 complete=false（有界清单，正常远小于此）。 */
-const RELATION_CAP = 300
-/** 分组渲染阈值：间接关系多于此数时，渲染指引切换为"直接展开 + 间接聚合计数"。 */
-const GROUPED_HINT_THRESHOLD = 40
-
 /** 由 TSDB 网关 baseUrl 派生 meta 接口基址。 */
 export function metaBaseUrl(tsdbBaseUrl: string): string {
   const base = tsdbBaseUrl.replace(/\/+$/, '')
@@ -189,15 +184,24 @@ export async function resolveClassPath(ctx: ToolContext, metaBase: string, model
  * 模板本身保持纯合法 JSON（模型照抄不会踩语法坑），data 构造规则放在 JSON 外。
  * 双击下钻默认开启：模板携带 drill.key（客户端按 key 注册合并路由，双击节点
  * 触发 patch 增量并入原图）；单击保留给 echarts 原生收起/展开。 */
-function renderHintRow(modelName: string, relationCount: number, directCount: number): Record<string, unknown> {
-  const grouped = relationCount > GROUPED_HINT_THRESHOLD
+function renderHintRow(
+  modelName: string,
+  relationCount: number,
+  directCount: number,
+  directReliable: boolean,
+  groupedHintThreshold: number,
+): Record<string, unknown> {
+  // direct 判定不可信（class_path 入参，见 run 内的 directKnown）时不给"直接/间接"
+  // 分组指引：按不可信的 direct 聚合会输出"直接 0 条 + 间接 N 条"的错误结论。
+  const grouped = directReliable && relationCount > groupedHintThreshold
   const dataRule = grouped
     ? `data 构造规则（本模型 ${relationCount} 条 = 直接 ${directCount} 条 + 间接 ${relationCount - directCount} 条）：` +
       `① direct=是 的每条关系各一个第二层节点（节点名 = relation_description，叶子 = 对端模型）；` +
       `② direct=否 的间接关系按中继模型（其 leftModelName）分组为「经XX链路」节点，叶子 = 对端模型（rightModelName），` +
       `同组多条时在名字后带计数（如"对端模型A ×3"）。间接关系不要逐条平铺。`
     : `data 构造规则：第二层 = 关系名（relation_description），叶子 = 对端模型（rightModelName）；` +
-      `同一对端模型多条关系时合并到一个关系节点。`
+      `同一对端模型多条关系时合并到一个关系节点。` +
+      (directReliable ? '' : `注意：本次以 class_path 入参，接口返回的是中文端点名，无法判定哪些关系是直接关系，direct 列一律为"未知"——不要按直接/间接分组。`)
   const drillProtocol =
     `双击图上任意节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
     `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
@@ -235,10 +239,15 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
 }
 
 /**
- * 预览上限 = 安全截断上限 + 渲染指引行（+1）。少了这个 +1，恰好 300 条
- * 关系时指引行会被切掉，模型只拿到数据和一句"仅展示前 300 行"。
+ * 模型可见的预览上限（`AskdataTool.previewLimit` 静态字段，拿不到 ctx.config，
+ * 故取一个恒定的上界常量）。
+ *
+ * 实际生效的截断上限是 `min(config.query.meta.relationCap, 本常量 - 1)`：
+ * 再减 1 是给渲染指引行留位（否则恰好撞到上限时指引行会被预览切掉，模型只拿到
+ * 数据和一句"仅展示前 N 行"）。取 min 而不是直接信任配置，是为了让"产出行数"
+ * 与"预览行数"在任意配置下都自洽——配置把 relationCap 调到本常量之上也不会丢指引行。
  */
-const RELATION_PREVIEW_LIMIT = RELATION_CAP + 1
+const RELATION_PREVIEW_LIMIT = 1000
 
 /** model_relation_graph 工具定义。 */
 export const modelRelationGraphTool: AskdataTool = {
@@ -280,18 +289,24 @@ export const modelRelationGraphTool: AskdataTool = {
       const text = await agpGet(ctx, metaBase, `/getRelationsByModel?modelName=${encodeURIComponent(classPath)}`)
       const env = parseAgpEnvelope(text)
 
-      const complete = env.rows.length <= RELATION_CAP
-      const data: Record<string, unknown>[] = env.rows.slice(0, RELATION_CAP).map((row, i) => ({
+      // 截断上限取 min（配置 relationCap，预览常量 -1）：见 RELATION_PREVIEW_LIMIT 注释。
+      const relationCap = Math.min(ctx.config.query.meta.relationCap, RELATION_PREVIEW_LIMIT - 1)
+      const complete = env.rows.length <= relationCap
+      // direct 判定只在"入参就是 API 回显的中文端点名"时成立；class_path 入参时
+      // 端点名恒不等于 class_path，逐行比对会得出"全部间接"的错误结论。
+      const directKnown = !modelName.includes('/')
+      const data: Record<string, unknown>[] = env.rows.slice(0, relationCap).map((row, i) => ({
         rank: i + 1,
         relation_name: String(row.relation_name ?? ''),
         relation_description: String(row.relation_description ?? ''),
         leftModelName: String(row.leftModelName ?? ''),
         rightModelName: String(row.rightModelName ?? ''),
         // 直接关系 = 查询模型本身是这条关系的端点；其余为经链路展开的间接关系。
-        // 名称匹配是尽力而为（API 返回中文端点名；class_path 入参时按原样比对）。
-        direct: String(row.leftModelName ?? '') === modelName || String(row.rightModelName ?? '') === modelName
-          ? '是'
-          : '否',
+        direct: !directKnown
+          ? '未知'
+          : String(row.leftModelName ?? '') === modelName || String(row.rightModelName ?? '') === modelName
+            ? '是'
+            : '否',
       }))
       if (data.length === 0) {
         data.push({
@@ -303,7 +318,13 @@ export const modelRelationGraphTool: AskdataTool = {
           direct: '',
         })
       } else {
-        data.push(renderHintRow(modelName, env.rows.length, data.filter((r) => r.direct === '是').length))
+        data.push(renderHintRow(
+          modelName,
+          env.rows.length,
+          data.filter((r) => r.direct === '是').length,
+          directKnown,
+          ctx.config.query.meta.groupedHintThreshold,
+        ))
       }
 
       const apiOrSql = `GET ${metaBase}/getRelationsByModel?modelName=${classPath} → ${env.rows.length} 条关系`

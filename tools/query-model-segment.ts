@@ -42,7 +42,7 @@ export const queryModelSegmentTool: AskdataTool = {
       },
       group_by_str: { type: 'string', description: '分组定义（可选）' },
       order_by_str: { type: 'string', description: '排序定义（可选）' },
-      page_size: { type: 'integer', description: '每页条数，默认 100，最大 1000' },
+      page_size: { type: 'integer', description: '每页条数（缺省与上限走部署配置，默认 100 / 最大 1000）' },
     },
     required: ['model_name', 'search_str', 'segment'],
   },

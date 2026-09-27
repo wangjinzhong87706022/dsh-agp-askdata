@@ -36,16 +36,34 @@ export interface DescribedEnvelope {
  * 信封 → fields/data/page。fields 取自响应 field 数组（title 缺省用 name）；
  * field 数组为空时从首行键名推导 string 列；data 行仅保留 field 定义内的列并
  * 按类型转换（行中多余键丢弃，缺失键补空串）。
+ *
+ * 退化形态：field 为空且首行取不出列（首行不是普通对象 / 是空对象）时，推导不出
+ * 任何列——此时不再回吐一串 `{}` 空行（rowCount>0 但模型看不到任何值），而是给出
+ * 一条显式说明行，让模型据实转告而不是把空行当成"有 N 行数据"。
  */
 export function describeEnvelope(env: AgpEnvelope): DescribedEnvelope {
   const colDefs = env.field.length > 0
     ? env.field
-    : Object.keys(env.rows[0] ?? {}).map((name) => ({ name, title: name, type: '3' }))
+    : isPlainRow(env.rows[0])
+      ? Object.keys(env.rows[0]).map((name) => ({ name, title: name, type: '3' }))
+      : []
   const fields: ResultField[] = colDefs.map((f) => ({
     name: String(f.name),
     title: String(f.title || f.name),
     type: resultFieldType(String(f.type ?? '3')),
   }))
+  const page = env.page
+  if (fields.length === 0 && env.rows.length > 0) {
+    return {
+      fields: [{ name: 'notice', title: '说明', type: 'string' }],
+      data: [{
+        notice:
+          `接口返回了 ${env.rows.length} 行数据但没有列定义（field 为空且首行不是对象），无法还原任何属性——`
+          + '这通常是接口契约变更或服务端异常。请如实说明，不要编造属性或数据。',
+      }],
+      ...(page !== undefined ? { page } : {}),
+    }
+  }
   const data = env.rows.map((row) => {
     const obj: Record<string, unknown> = {}
     for (const f of fields) {
@@ -54,8 +72,13 @@ export function describeEnvelope(env: AgpEnvelope): DescribedEnvelope {
     return obj
   })
   const out: DescribedEnvelope = { fields, data }
-  if (env.page) out.page = env.page
+  if (page) out.page = page
   return out
+}
+
+/** 首行是否为可取键的普通对象（string/number/array 的 Object.keys 会产出无意义列）。 */
+function isPlainRow(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** 正整数入参校验（分页共用），失败抛 INVALID_PARAM。 */
@@ -67,9 +90,11 @@ export function validatePositiveInt(value: unknown, field: string): number {
   return n
 }
 
-/** pageSize 解析：默认 100，上限走 config.query.rest.maxPageSize（AGP 要求 <1000）。 */
+/** pageSize 解析：缺省走 config.query.meta.defaultPageSize，上限走 config.query.rest.maxPageSize（AGP 要求 <1000）。 */
 export function resolvePageSize(value: unknown, ctx: ToolContext): number {
-  const requested = value === undefined || value === null || value === '' ? 100 : validatePositiveInt(value, 'page_size')
+  const requested = value === undefined || value === null || value === ''
+    ? ctx.config.query.meta.defaultPageSize
+    : validatePositiveInt(value, 'page_size')
   return Math.min(requested, ctx.config.query.rest.maxPageSize)
 }
 

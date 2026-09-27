@@ -43,7 +43,7 @@ export const queryModelTool: AskdataTool = {
       },
       where_str: { type: 'string', description: '查询条件（如 "参数值 > 10"），可空串' },
       page_num: { type: 'integer', description: '页码，默认 1' },
-      page_size: { type: 'integer', description: '每页条数，默认 100，最大 1000' },
+      page_size: { type: 'integer', description: '每页条数（缺省与上限走部署配置，默认 100 / 最大 1000）' },
       order_by_str: { type: 'string', description: '排序定义（如 "参数值 DESC"），可空串' },
       group_by_str: { type: 'string', description: '分组定义，可空串' },
     },

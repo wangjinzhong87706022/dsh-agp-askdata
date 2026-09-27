@@ -85,6 +85,14 @@ export const Config = z.object({
       fallbackToSql: z.boolean().default(true).description('REST 调用失败（网关不可达/响应不合法）时自动回落 SQL 通道；关闭则失败直接返回'),
       maxPageSize: z.number().default(1000).min(1).description('meta 数据查询单页最大行数（query_model 等的 pageSize 上限；AGP 接口要求 <1000）'),
     }).collapse().description('REST 通道（TSDB HTTP 网关）'),
+    meta: z.object({
+      relationCap: z.number().default(300).min(1)
+        .description('model_relation_graph 关系清单的安全截断上限：超出即截断并置 complete=false'),
+      groupedHintThreshold: z.number().default(40).min(0)
+        .description('关系数多于此值时渲染指引切换为"直接展开 + 间接按中继模型聚合计数"（仅中文模型名入参时 direct 判定可信；配 0 = 永不切换）'),
+      defaultPageSize: z.number().default(100).min(1)
+        .description('meta 查询族（query_model / query_model_segment / query_relation_segment）未传 page_size 时的默认单页行数'),
+    }).collapse().description('meta 元数据面阈值（AGP 数据底座 meta 接口工具族）'),
     useAggregateTable: z.boolean().default(true)
       .description('是否使用 WT_CUBE 预聚合路由：开启后 aggregate 对 1H/1D/1M/1Y 粒度 tag 自动查聚合表（快）；关闭 = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),
     aggregateTable: z.string().default('WT_CUBE')
@@ -104,6 +112,8 @@ export const Config = z.object({
     defaultLimit: z.number().default(1000).min(1).description('时序/聚合工具默认返回行数'),
     defaultLookupLimit: z.number().default(100).min(1).description('字典/设备反查工具默认返回行数'),
     defaultAlarmLimit: z.number().default(100).min(1).description('告警工具默认返回行数（控制进入模型上下文的量）'),
+    defaultPreviewLimit: z.number().default(20).min(1)
+      .description('工具未自声明 previewLimit 时，模型可见结果预览的默认行数（有界元数据清单类工具会自声明更大的值）'),
     timeZone: z.string().default('+08:00').pattern(/^[+-]\d{2}:\d{2}$/)
       .description('会话时区，仅接受 ±HH:MM（如 +08:00）；时间字面量统一按此偏移换算'),
   }).collapse().description('护栏阈值（全部在执行前机械生效，与 LLM 无关）'),
@@ -166,15 +176,15 @@ export const Config = z.object({
 
   toolsets: z.object({
     sql: z.boolean().default(true)
-      .description('内网 SQL 取数面（P0 五 + P1 六 + askdata_deep_analysis，StarRocks/MySQL）。云端 API 部署（内网库不可达）请关闭——模型工具集将无任何 SQL 工具，杜绝工具名幻觉'),
+      .description('内网 SQL 取数面（P0 五 + P1 六 + askdata_deep_analysis，共 12 个，StarRocks/MySQL）。云端 API 部署（内网库不可达）请关闭——模型工具集将无任何 SQL 工具，杜绝工具名幻觉'),
     api: z.boolean().default(true)
-      .description('AGP REST 面（generate_duty_report / list_duty_stations / model_relation_graph，走 query.rest 网关）'),
+      .description('AGP API 面（共 8 个，走 query.rest 网关）：值班报告 generate_duty_report / list_duty_stations，meta 元数据 model_relation_graph / model_field_list / relation_field_list / query_model / query_model_segment / query_relation_segment'),
     knowledge: z.boolean().default(true)
-      .description('RAGFlow 知识面（knowledge_graph / knowledge_search / knowledge_wiki_page / knowledge_mindmap）'),
-  }).collapse().description('工具组开关（部署形态隔离；默认全开 = 19 工具。云端 API 形态：sql=false + presetId=askdata-api）'),
+      .description('RAGFlow 知识面（4 个：knowledge_graph / knowledge_search / knowledge_wiki_page / knowledge_mindmap）'),
+  }).collapse().description('工具组开关（部署形态隔离；默认全开 = 24 工具。云端 API 形态：sql=false + presetId=askdata-api）'),
 
-  installPreset: z.boolean().default(true).description('启动时把 preset/askdata/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
-  presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）'),
+  installPreset: z.boolean().default(true).description('启动时把 preset/<presetId>/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
+  presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）；只接受小写字母开头的 kebab-case 短名，内置目录为 askdata / askdata-api'),
 })
 
 /** 配置 schema 的已解析形态（loader 应用默认值后传入 apply）。 */
@@ -218,6 +228,7 @@ export function toRuntimeConfig(config: Config): Parameters<typeof createAskdata
     query: {
       tsdbChannel: config.query.tsdbChannel,
       rest: config.query.rest,
+      meta: config.query.meta,
       useAggregateTable: config.query.useAggregateTable,
       aggregateTable: config.query.aggregateTable,
       cubeTypeMap: parseJsonMapField('query.cubeTypeMapJson', config.query.cubeTypeMapJson) as Record<number, string>,
@@ -269,12 +280,28 @@ export function resolveDshHome(env: Record<string, string | undefined> = process
 }
 
 /**
+ * presetId 白名单：presetId 同时被拼进源目录（`preset/<presetId>/`）与目标目录
+ * （`$DSH_HOME/.agent-presets/<presetId>/`），形如 `../../` 或带绝对路径分隔符的值
+ * 会把安装面变成任意目录写。故只接受 kebab-case 短名，非法即跳过安装并告警
+ * （不抛异常打断启动——preset 安装是尽力而为项）。
+ */
+const PRESET_ID_RE = /^[a-z][a-z0-9-]{0,40}$/
+
+/**
  * 安装 `preset/<presetId>/` 到 `$DSH_HOME/.agent-presets/<presetId>/`。
  *
  * 幂等：目标已存在（以 agent.cordis.yml 为准）则跳过，绝不覆盖用户改动；
- * 尽力而为：失败仅告警并给出手动安装指引，不阻断启动。
+ * 尽力而为：presetId 非法或失败均仅告警并给出手动安装指引，不阻断启动。
  */
 export async function installPreset(ctx: Context, presetId: string): Promise<boolean> {
+  if (!PRESET_ID_RE.test(presetId)) {
+    ctx.logger.warn(
+      'askdata: presetId "%s" 非法（只允许小写字母开头的 kebab-case 短名，1-41 字符），已跳过安装；'
+      + '仓库内置的 preset 目录只有 askdata 与 askdata-api，请把 presetId 改成其中之一',
+      presetId,
+    )
+    return false
+  }
   const targetDir = join(resolveDshHome(), '.agent-presets', presetId)
   const sourceDir = fileURLToPath(new URL(`../../preset/${presetId}/`, import.meta.url))
   try {
@@ -292,10 +319,12 @@ export async function installPreset(ctx: Context, presetId: string): Promise<boo
     return true
   } catch (error) {
     ctx.logger.warn(
-      'askdata: failed to install preset "%s" to %s (%s); copy preset/askdata/ manually to enable the AGP问数 preset',
+      'askdata: failed to install preset "%s" to %s (%s); copy preset/%s/ manually to %s to enable it',
       presetId,
       targetDir,
       error instanceof Error ? error.message : String(error),
+      presetId,
+      targetDir,
     )
     return false
   }

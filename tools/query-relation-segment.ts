@@ -46,7 +46,7 @@ export const queryRelationSegmentTool: AskdataTool = {
       right_model_name: { type: 'string', description: '右模型继承模型名（可选，缺省用关系定义）' },
       group_by_str: { type: 'string', description: '分组定义（可选）' },
       order_by_str: { type: 'string', description: '排序定义（可选）' },
-      page_size: { type: 'integer', description: '每页条数，默认 100，最大 1000' },
+      page_size: { type: 'integer', description: '每页条数（缺省与上限走部署配置，默认 100 / 最大 1000）' },
     },
     required: ['relation_name', 'search_str', 'segment'],
   },
@@ -67,6 +67,9 @@ export const queryRelationSegmentTool: AskdataTool = {
       const body = {
         relationName,
         searchStr,
+        // whereStr 恒空串：AGP 该接口要求"参数全传、值可空"，但工具刻意不开放
+        // 全局 where 条件——分段聚合的过滤语义全部落在 segment[].where_str 上，
+        // 再开一个跨段生效的 where 会让"每段独立计算"的语义出现歧义。
         whereStr: '',
         orderByStr: validateMetaFragment(args.order_by_str, 'order_by_str'),
         groupByStr: validateMetaFragment(args.group_by_str, 'group_by_str'),

@@ -938,14 +938,16 @@ meta 数据查询族自此断档。
 
 | 场景 | 工具 | 设计 |
 |---|---|---|
-| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | `previewLimit: 300`（安全上限，超限 complete=false）；模型面全量返回；关系行带 `direct` 标记（查询模型是端点=直接关系，API 会返回经链路展开的间接关系）；关系数 >40 时渲染指引切换为"直接展开 + 间接按对端模型聚合计数" |
+| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | 模型可见预览上限远大于安全截断上限（`previewLimit` 常量 1000 vs `query.meta.relationCap` 300，两者取 min 生效，超限 complete=false）；模型面全量返回；关系行带 `direct` 标记（查询模型是端点=直接关系，API 会返回经链路展开的间接关系；**class_path 入参时标记为"未知"且不给分组指引**——端点名与 class_path 不可比）；关系数 >`query.meta.groupedHintThreshold`（默认 40）时渲染指引切换为"直接展开 + 间接按对端模型聚合计数" |
 | 无界业务数据 | query_model | 保留分页；`page.itemTotal` 顶层透出为 `total`，单页即全量时 `complete=true`；description 教"total 超一页先收窄 where_str 或改用 query_model_segment，不要逐页翻" |
 | 聚合统计 | query_model_segment / query_relation_segment | 输出天然小，同样透出 total/complete |
 
-机制：`ToolResult.total/complete`（模型可见的完整性契约，adapter 顶层透出）+
-`AskdataTool.previewLimit`（工具自声明的模型/前端预览上限，缺省仍 20——SQL 行
-查询面不受影响）。反面清单：不给元数据工具暴露分页参数（诱导翻页循环）；不为
-"完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。
+机制：`ToolResult.total/complete`（模型可见的完整性契约，adapter 顶层透出；
+complete 缺省语义统一为 `rowCount >= total`）+ `AskdataTool.previewLimit`（工具
+自声明的模型/前端预览上限，未声明时取 `system.defaultPreviewLimit`，默认 20——
+SQL 行查询面不受影响）。反面清单：不给元数据工具暴露分页参数（诱导翻页循环）；
+不为"完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。所有阈值一律走
+`src/config.ts`（AGENTS.md：实现内不得有第二套默认值），加载期做正整数断言。
 
 #### 20.4.2 双击下钻（默认开启，2026-09-25）
 

@@ -14,7 +14,7 @@ import { queryModelSegmentTool } from '../tools/query-model-segment.ts'
 import { queryRelationSegmentTool } from '../tools/query-relation-segment.ts'
 import { relationFieldListTool } from '../tools/relation-field-list.ts'
 import { modelRelationGraphTool } from '../tools/model-relation-graph.ts'
-import { resultFieldType } from '../tools/meta-common.ts'
+import { describeEnvelope, resultFieldType } from '../tools/meta-common.ts'
 
 const RELATION_ENVELOPE = {
   code: 0,
@@ -74,10 +74,16 @@ const RELATION_ATTRS_ENVELOPE = {
   },
 }
 
-function ctxOf(fetchImpl: (url: string | URL | Request) => Promise<Response>): ToolContext {
+function ctxOf(
+  fetchImpl: (url: string | URL | Request) => Promise<Response>,
+  meta?: Partial<{ defaultPageSize: number }>,
+): ToolContext {
   const config = resolveConfig({
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
-    query: { rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 } },
+    query: {
+      rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 },
+      ...(meta ? { meta } : {}),
+    },
   })
   const executor = { execute: async () => ({ columns: [], rows: [] }) }
   return { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as typeof fetch }
@@ -167,6 +173,49 @@ describe('query_model', () => {
       ctxOf(fetchImpl as unknown as typeof fetch),
     )
     expect(postedBodyOf(fetchImpl).pageSize).toBe(1000)
+  })
+
+  it('缺省 page_size 走 config.query.meta.defaultPageSize（不再内嵌 100）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(MODEL_DATA_ENVELOPE))
+    await queryModelTool.run(
+      { model_name: 'X', search_str: 'id' },
+      ctxOf(fetchImpl as unknown as typeof fetch, { defaultPageSize: 7 }),
+    )
+    expect(postedBodyOf(fetchImpl).pageSize).toBe(7)
+    // 缺省仍受 maxPageSize 收口
+    const capped = vi.fn(async () => jsonResponse(MODEL_DATA_ENVELOPE))
+    await queryModelTool.run(
+      { model_name: 'X', search_str: 'id' },
+      ctxOf(capped as unknown as typeof fetch, { defaultPageSize: 5000 }),
+    )
+    expect(postedBodyOf(capped).pageSize).toBe(1000)
+  })
+})
+
+describe('describeEnvelope 退化形态（field 空 + 行取不出列）', () => {
+  it('不回吐 {} 空行，改给一条显式说明行', async () => {
+    // 首行不是普通对象：列定义推不出来（服务端形态异常/契约变更）
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, message: 'ok', data: { field: [], data: ['x', 'y'] } }))
+    const res = await queryModelTool.run(
+      { model_name: 'X', search_str: 'id' },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res.success).toBe(true)
+    expect(res.rowCount).toBe(1)
+    expect(res.fields.map((f) => f.name)).toEqual(['notice'])
+    expect(String(res.data[0]!.notice)).toContain('没有列定义')
+    expect(String(res.data[0]!.notice)).toContain('不要编造')
+  })
+
+  it('首行是普通对象时仍按首行键名推导列（不误伤）', () => {
+    const described = describeEnvelope({
+      code: 0,
+      message: '',
+      field: [],
+      rows: [{ name: '汛限水位' }],
+    })
+    expect(described.fields.map((f) => f.name)).toEqual(['name'])
+    expect(described.data).toEqual([{ name: '汛限水位' }])
   })
 })
 

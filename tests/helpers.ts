@@ -11,6 +11,7 @@ export const DEFAULT_LIMITS_FOR_TEST: SystemLimits = {
   defaultLimit: 1000,
   defaultLookupLimit: 100,
   defaultAlarmLimit: 100,
+  defaultPreviewLimit: 20,
   timeZone: '+08:00',
 }
 

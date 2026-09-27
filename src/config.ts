@@ -55,6 +55,8 @@ export interface QueryConfig {
     /** meta 数据查询单页最大行数（pageSize 上限；AGP 接口要求 <1000）。 */
     maxPageSize: number
   }
+  /** meta 元数据面（AGP 数据底座 meta 接口工具族）的可调阈值。 */
+  meta: MetaQueryLimits
   /** 是否启用预聚合表路由（false = 强制只用 WT_DATA 全聚合；通用行业/口径存疑时关闭）。 */
   useAggregateTable: boolean
   /** 层2：聚合表名（空串 = 强制只用 WT_DATA，通用行业）。 */
@@ -63,6 +65,27 @@ export interface QueryConfig {
   cubeTypeMap: Record<number, string>
   /** 层3：粒度后缀 → granularity 值映射。 */
   granularityMap: Record<string, number>
+}
+
+/**
+ * meta 元数据面工具族（tools/meta-*.ts、model-relation-graph）的可调阈值。
+ *
+ * 这些阈值过去内嵌在工具模块里（模块级常量），等于存在第二套默认值；现在
+ * 全部收进配置，与 SQL 面阈值同源同改。
+ */
+export interface MetaQueryLimits {
+  /**
+   * `model_relation_graph` 关系清单的安全截断上限：超出即截断并置
+   * `complete=false`（有界清单，正常远小于此）。
+   */
+  relationCap: number
+  /**
+   * 分组渲染阈值：关系数多于此值时，渲染指引切换为"直接展开 + 间接聚合计数"。
+   * 仅在 direct 判定可信（中文模型名入参）时生效，见 tools/model-relation-graph.ts。
+   */
+  groupedHintThreshold: number
+  /** meta 查询族（query_model / *_segment 等）未显式传 page_size 时的默认单页行数。 */
+  defaultPageSize: number
 }
 
 /** 系统护栏与阈值。 */
@@ -83,6 +106,11 @@ export interface SystemLimits {
   defaultLookupLimit: number
   /** 告警类工具的默认返回行数（低于 defaultLimit，控制进入模型上下文的行数）。 */
   defaultAlarmLimit: number
+  /**
+   * 工具未自声明 `previewLimit` 时，模型可见结果预览的默认行数
+   * （`src/dsh/adapter.ts` 用；SQL 行查询面历史值）。
+   */
+  defaultPreviewLimit: number
   /** 会话时区，必须为 ±HH:MM 格式，默认 +08:00。 */
   timeZone: string
 }
@@ -203,9 +231,9 @@ export interface AskdataConfig {
   /** 值班报告面（防汛值班报告 Agent；空台账 = 面不可用，调用期明确提示）。 */
   duty: DutyConfig
   /**
-   * 工具组开关（部署形态隔离，默认全开 = 现状 19 工具）：
-   * - sql：P0 五 + P1 六 + askdata_deep_analysis（内网 StarRocks/MySQL 取数面）
-   * - api：值班报告二 + 关系图谱一（AGP REST 网关面）
+   * 工具组开关（部署形态隔离，默认全开 = 现状 24 工具）：
+   * - sql：P0 五 + P1 六 + askdata_deep_analysis（内网 StarRocks/MySQL 取数面，共 12）
+   * - api：值班报告二 + meta 元数据面六（AGP REST 网关面，共 8）
    * - knowledge：RAGFlow 知识面四工具
    * 云端 API 部署（如 openagp.top）关 sql：模型工具集里没有任何 SQL 工具，
    * persona 也不会提及，避免"只有光伏域 SQL 工具却被问云端项目"时的工具名幻觉。
@@ -234,6 +262,13 @@ function normalizeRagflowBaseUrl(value: string): string {
 function assertIdentifier(value: string, label: string): void {
   if (!IDENTIFIER_RE.test(value)) {
     throw new Error(`配置错误：${label} 不是合法标识符: ${value}`)
+  }
+}
+
+/** 阈值必须是 ≥1 的整数（0/负数/小数会让截断、分页、预览静默失效）。 */
+function assertPositiveInt(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`配置错误：${label} 必须是 ≥1 的整数，收到: ${String(value)}`)
   }
 }
 
@@ -281,6 +316,8 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
   query: {
     tsdbChannel: 'sql',
     rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true, maxPageSize: 1000 },
+    // meta 面阈值：关系图谱安全上限 / 分组渲染阈值 / 默认单页行数。
+    meta: { relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100 },
     useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
@@ -295,6 +332,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     defaultLimit: 1000,
     defaultLookupLimit: 100,
     defaultAlarmLimit: 100,
+    defaultPreviewLimit: 20,
     timeZone: '+08:00',
   },
   security: {
@@ -328,8 +366,27 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     stations: [] as DutyStation[],
     reporting: [] as DutyReporting[],
   },
-  // 工具组默认全开（现状 19 工具）；云端 API 部署配 { sql: false }。
+  // 工具组默认全开（现状 24 工具）；云端 API 部署配 { sql: false }。
   toolsets: { sql: true, api: true, knowledge: true },
+}
+
+/**
+ * `resolveConfig` 入参形态：顶层字段全可选，嵌套段也支持部分覆盖
+ * （缺省项由 DEFAULT_CONFIG 补齐）。`createAskdataService` 复用同一形态，
+ * 避免入口处再抄一份输入类型。
+ */
+export interface AskdataConfigInput {
+  connection: StarRocksConnection
+  mysqlConnection?: Partial<MysqlConnection>
+  appId?: number
+  tables?: Partial<TableNames>
+  query?: Partial<Omit<QueryConfig, 'meta'>> & { meta?: Partial<MetaQueryLimits> }
+  system?: Partial<SystemLimits>
+  security?: Partial<SecurityConfig>
+  audit?: Partial<AuditConfig>
+  knowledge?: Partial<KnowledgeConfig>
+  duty?: Partial<DutyConfig>
+  toolsets?: Partial<AskdataConfig['toolsets']>
 }
 
 /**
@@ -337,19 +394,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
  *
  * 表名与白名单在此处做标识符校验，配置错误在加载期立即失败（misconfiguration fails loud）。
  */
-export function resolveConfig(input: {
-  connection: StarRocksConnection
-  mysqlConnection?: Partial<MysqlConnection>
-  appId?: number
-  tables?: Partial<TableNames>
-  query?: Partial<QueryConfig>
-  system?: Partial<SystemLimits>
-  security?: Partial<SecurityConfig>
-  audit?: Partial<AuditConfig>
-  knowledge?: Partial<KnowledgeConfig>
-  duty?: Partial<DutyConfig>
-  toolsets?: Partial<AskdataConfig['toolsets']>
-}): AskdataConfig {
+export function resolveConfig(input: AskdataConfigInput): AskdataConfig {
   const tables = { ...DEFAULT_CONFIG.tables, ...input.tables }
   const system = { ...DEFAULT_CONFIG.system, ...input.system }
   const security = { ...DEFAULT_CONFIG.security, ...input.security }
@@ -360,6 +405,7 @@ export function resolveConfig(input: {
     ...DEFAULT_CONFIG.query,
     ...input.query,
     rest: { ...DEFAULT_CONFIG.query.rest, ...input.query?.rest },
+    meta: { ...DEFAULT_CONFIG.query.meta, ...input.query?.meta },
     cubeTypeMap: input.query?.cubeTypeMap ?? DEFAULT_CONFIG.query.cubeTypeMap,
     granularityMap: input.query?.granularityMap ?? DEFAULT_CONFIG.query.granularityMap,
   }
@@ -392,6 +438,14 @@ export function resolveConfig(input: {
   if (query.tsdbChannel === 'rest' && !query.rest.baseUrl) {
     throw new Error('配置错误：query.tsdbChannel=rest 时必须配置 query.rest.baseUrl（TSDB HTTP 网关地址）')
   }
+  assertPositiveInt(query.rest.maxPageSize, 'query.rest.maxPageSize')
+  assertPositiveInt(query.meta.relationCap, 'query.meta.relationCap')
+  assertPositiveInt(query.meta.defaultPageSize, 'query.meta.defaultPageSize')
+  // groupedHintThreshold 允许 0（"永不切换分组指引" 是合法部署），只校验整数形态。
+  if (!Number.isInteger(query.meta.groupedHintThreshold) || query.meta.groupedHintThreshold < 0) {
+    throw new Error(`配置错误：query.meta.groupedHintThreshold 必须是 ≥0 的整数，收到: ${String(query.meta.groupedHintThreshold)}`)
+  }
+  assertPositiveInt(system.defaultPreviewLimit, 'system.defaultPreviewLimit')
 
   const knowledge = resolveKnowledgeConfig(input.knowledge)
   const duty = resolveDutyConfig(input.duty)
