@@ -13,7 +13,7 @@ import { fail, ok } from '../src/result.ts'
 import { askdataError, AskdataError } from '../src/errors.ts'
 import type { ErrorCode } from '../src/errors.ts'
 import { metaBaseUrl, parseAgpEnvelope } from './model-relation-graph.ts'
-import { agpPost, describeEnvelope, parseSegments, resolvePageSize } from './meta-common.ts'
+import { agpPost, describeEnvelope, parseSegments, resolvePageSize, validateMetaFragment } from './meta-common.ts'
 
 /** query_relation_segment 工具定义。 */
 export const queryRelationSegmentTool: AskdataTool = {
@@ -56,7 +56,7 @@ export const queryRelationSegmentTool: AskdataTool = {
     try {
       if (ctx.signal?.aborted) throw askdataError('BACKEND_DOWN', '工具调用已被取消')
       const relationName = typeof args.relation_name === 'string' ? args.relation_name.trim() : ''
-      const searchStr = typeof args.search_str === 'string' ? args.search_str.trim() : ''
+      const searchStr = validateMetaFragment(args.search_str, 'search_str')
       if (relationName === '') throw askdataError('INVALID_PARAM', 'relation_name 必填（关系名称）')
       if (searchStr === '') throw askdataError('INVALID_PARAM', 'search_str 必填（如 "name,count(*) as 计数"）')
       if (!ctx.config.query.rest.baseUrl) {
@@ -68,8 +68,8 @@ export const queryRelationSegmentTool: AskdataTool = {
         relationName,
         searchStr,
         whereStr: '',
-        orderByStr: typeof args.order_by_str === 'string' ? args.order_by_str.trim() : '',
-        groupByStr: typeof args.group_by_str === 'string' ? args.group_by_str.trim() : '',
+        orderByStr: validateMetaFragment(args.order_by_str, 'order_by_str'),
+        groupByStr: validateMetaFragment(args.group_by_str, 'group_by_str'),
         pageNum: 1,
         pageSize: resolvePageSize(args.page_size, ctx),
         leftModelName: typeof args.left_model_name === 'string' ? args.left_model_name.trim() : '',

@@ -95,12 +95,15 @@ export function parseAgpEnvelope(text: string): AgpEnvelope {
   const field = Array.isArray(data.field) ? (data.field as Record<string, unknown>[]) : []
   const rows = Array.isArray(data.data) ? (data.data as Record<string, unknown>[]) : []
   const rawPage = (data.page ?? null) as Record<string, unknown> | null
+  // Non-finite server values become 0 — a NaN total would render as null and
+  // make every `rowCount >= total` completeness check silently false.
+  const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
   const page = rawPage
     ? {
-        pageNum: Number(rawPage.pageNum ?? 0),
-        pageSize: Number(rawPage.pageSize ?? 0),
-        pageTotal: Number(rawPage.pageTotal ?? 0),
-        itemTotal: Number(rawPage.itemTotal ?? 0),
+        pageNum: num(rawPage.pageNum),
+        pageSize: num(rawPage.pageSize),
+        pageTotal: num(rawPage.pageTotal),
+        itemTotal: num(rawPage.itemTotal),
       }
     : undefined
   return { code, message, field, rows, page }
@@ -129,15 +132,28 @@ export async function agpGet(ctx: ToolContext, metaBase: string, pathAndQuery: s
   return decodeAgpBody(await res.arrayBuffer())
 }
 
+/**
+ * `class_alias` 白名单：模型中文名不含 SQL 元字符，`''` 倍增在 MySQL 默认
+ * sql_mode（反斜杠转义开启）下可被 `\'` 击穿，故此处改白名单而非转义。
+ * 允许：中日韩文、字母、数字、空格、`·-（）()、,` 等建模命名的实际字符。
+ */
+const CLASS_ALIAS_RE = /^[\p{Script=Han}a-zA-Z0-9 _·\-()（）,.]{1,64}$/u
+
 /** 中文名 → class_path（queryByGenericSql 查 meta_class_info.class_alias）。（meta 面工具共享） */
 export async function resolveClassPath(ctx: ToolContext, metaBase: string, modelName: string, urlLog: string[]): Promise<string> {
+  if (!CLASS_ALIAS_RE.test(modelName)) {
+    throw askdataError(
+      'INVALID_PARAM',
+      `模型名含非法字符（仅允许中文/字母/数字/空格与 -_·（）, .）：${modelName.slice(0, 40)}`,
+    )
+  }
   const cred = resolveAgpCredentials(ctx.config.query.rest, ctx.config.appId)
   const url = `${metaBase}/model/queryByGenericSql`
   urlLog.push(`${url} (class_alias=${modelName})`)
   const impl = ctx.fetchImpl ?? fetch
   const timeout = AbortSignal.timeout(ctx.config.system.queryTimeoutMs)
   const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout
-  const sql = `select class_alias, class_name, class_path from meta_class_info where class_alias='${modelName.replaceAll("'", "''")}'`
+  const sql = `select class_alias, class_name, class_path from meta_class_info where class_alias='${modelName}'`
   let res: Response
   try {
     res = await impl(url, {
@@ -218,10 +234,16 @@ function renderHintRow(modelName: string, relationCount: number, directCount: nu
   }
 }
 
+/**
+ * 预览上限 = 安全截断上限 + 渲染指引行（+1）。少了这个 +1，恰好 300 条
+ * 关系时指引行会被切掉，模型只拿到数据和一句"仅展示前 300 行"。
+ */
+const RELATION_PREVIEW_LIMIT = RELATION_CAP + 1
+
 /** model_relation_graph 工具定义。 */
 export const modelRelationGraphTool: AskdataTool = {
   name: 'model_relation_graph',
-  previewLimit: 300,
+  previewLimit: RELATION_PREVIEW_LIMIT,
   description:
     '查询一个模型的关系链（关系图谱）：返回与指定模型相关的所有模型关系清单（关系名称、左模型、右模型），'
     + '并按指引以 dsh-ui echart 树形图渲染。输入中文模型名（如 水泵模型、企业职工模型、安科瑞水表模型；'
@@ -312,4 +334,3 @@ export const modelRelationGraphTool: AskdataTool = {
   },
 }
 
-export const MODEL_RELATION_GRAPH_FIELDS = FIELDS

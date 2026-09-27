@@ -13,7 +13,28 @@ import { queryModelTool } from '../tools/query-model.ts'
 import { queryModelSegmentTool } from '../tools/query-model-segment.ts'
 import { queryRelationSegmentTool } from '../tools/query-relation-segment.ts'
 import { relationFieldListTool } from '../tools/relation-field-list.ts'
+import { modelRelationGraphTool } from '../tools/model-relation-graph.ts'
 import { resultFieldType } from '../tools/meta-common.ts'
+
+const RELATION_ENVELOPE = {
+  code: 0,
+  message: 'success',
+  data: {
+    field: [{ name: 'relation_description', title: '关系名称', type: '3' }],
+    data: [{ relation_description: '关系A', leftModelName: '水泵模型', rightModelName: '设备基础模型' }],
+  },
+}
+
+const CLASS_LIST_ENVELOPE = {
+  code: '0',
+  msg: '成功',
+  data: {
+    field: [],
+    data: [
+      { class_alias: '水泵模型', class_name: 'wt_10462_shuibengmoxing', class_path: 'wt_elm_equipment/wt_10462_shuibengmoxing' },
+    ],
+  },
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -225,5 +246,64 @@ describe('relation_field_list', () => {
 
     const r2 = await relationFieldListTool.run({}, ctxOf(async () => jsonResponse({})))
     expect(r2.errorCode).toBe('INVALID_PARAM')
+  })
+})
+
+describe('meta 查询片段护栏（B1/B2：自由 SQL 文本不得直发服务端）', () => {
+  const ctx = () => ctxOf(async () => jsonResponse(MODEL_DATA_ENVELOPE))
+
+  it('search_str 含注入片段 → INVALID_PARAM（; -- /* 与 DML/DDL 关键字）', async () => {
+    for (const payload of ['id; drop table x', 'id -- c', 'id /* c */', "id union select 1", 'id, load_file(1)']) {
+      const res = await queryModelTool.run({ model_name: 'X', search_str: payload }, ctx())
+      expect(res.success).toBe(false)
+      expect(res.errorCode).toBe('INVALID_PARAM')
+    }
+  })
+
+  it('where/order/group 同等设防；空串仍合法（接口"参数全传、值可空"）', async () => {
+    const r1 = await queryModelTool.run({ model_name: 'X', search_str: 'id', where_str: "name='a'; drop table t" }, ctx())
+    expect(r1.errorCode).toBe('INVALID_PARAM')
+    const fetchImpl = vi.fn(async () => jsonResponse(MODEL_DATA_ENVELOPE))
+    const r2 = await queryModelTool.run({ model_name: 'X', search_str: 'id', where_str: '', order_by_str: 'id DESC' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(r2.success).toBe(true)
+    expect(postedBodyOf(fetchImpl).whereStr).toBe('')
+  })
+
+  it('segment[].where_str 含注入片段 → 拒绝', async () => {
+    const res = await queryModelSegmentTool.run(
+      { model_name: 'X', search_str: 'id,count(*)', segment: [{ where_str: 'id>0; drop table t' }] },
+      ctx(),
+    )
+    expect(res.errorCode).toBe('INVALID_PARAM')
+    expect(res.errorMessage).toContain('segment[0].where_str')
+  })
+
+  it('search_str 传 *,canshuzhi 也被拒（按逗号切分逐段判 *）', async () => {
+    const res = await queryModelTool.run({ model_name: 'X', search_str: '*,canshuzhi' }, ctx())
+    expect(res.errorCode).toBe('INVALID_PARAM')
+  })
+})
+
+describe('class_alias 白名单（B2：反斜杠可击穿引号倍增，故走白名单）', () => {
+  const ctx = () => ctxOf(async () => jsonResponse(CLASS_LIST_ENVELOPE))
+
+  it('含引号/反斜杠/分号/注释符的模型名被拒（不进入 SQL 拼接）', async () => {
+    const payload = "a\' OR 1=1 -- "
+    const fetchImpl = vi.fn(async () => jsonResponse(CLASS_LIST_ENVELOPE))
+    const res = await modelRelationGraphTool.run({ model_name: payload }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.success).toBe(false)
+    expect(res.errorCode).toBe('INVALID_PARAM')
+    // 白名单在拼接前拦截：查询类接口一次都没被调用
+    const calls = (fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls
+    expect(calls.filter(c => String(c[0]).includes('queryByGenericSql'))).toHaveLength(0)
+  })
+
+  it('正常中文模型名仍可解析（白名单不误伤）', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse(RELATION_ENVELOPE)
+    })
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.success).toBe(true)
   })
 })

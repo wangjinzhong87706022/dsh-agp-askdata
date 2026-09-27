@@ -284,42 +284,25 @@ Y = 年聚合（1Y 走 WT_CUBE）
 [3] 文字概述：关系数量、对端模型清单、每条关系的含义
 \`\`\`
 
-## 2. dsh-ui 树形图模板（echart tree，配色 + 拖拽缩放 + 点击下钻）
+## 2. dsh-ui 树形图模板（preset:'tree'——只写内容，样式由渲染器内置）
 
 工具返回的关系清单每行是一条关系（JSON）。把它们按"对端模型"聚合为树，
-**套用下面的完整模板**（已内置配色、可拖拽缩放 roam、展开/收起、悬停高亮、
-保存图片按钮和点击下钻桥，只需替换 title 与 data）：
+**套用下面这个极简模板**（配色、拖拽缩放、悬停高亮、保存图片、双击下钻全部
+内置在渲染器里；**不要自己写 option 或样式字段**，长模板手抄正是围栏 JSON
+损坏的主因）：
 
 \`\`\`dsh-ui
-{"type":"echart","title":"某模型 · 关系图谱（N 条关系）","height":560,
- "actionTemplate":"下钻模型：{name}",
- "option":{
-  "tooltip":{"trigger":"item","triggerOn":"mousemove"},
-  "toolbox":{"show":true,"feature":{"saveAsImage":{}},"right":10,"top":2},
-  "series":[{
-    "type":"tree","roam":true,"expandAndCollapse":true,"initialTreeDepth":-1,
-    "orient":"LR","left":16,"right":200,"top":10,"bottom":10,
-    "symbol":"circle","symbolSize":12,
-    "itemStyle":{"color":"#5b8ff9","borderColor":"#5b8ff9","borderWidth":2},
-    "lineStyle":{"color":"#b8c6dd","width":1.5,"curveness":0.45},
-    "label":{"position":"left","fontSize":13,"color":"#47607c","distance":6},
-    "leaves":{"symbolSize":9,"itemStyle":{"color":"#5ad8a6"},
-              "label":{"position":"right","fontSize":13,"color":"#2e7d5b"}},
-    "emphasis":{"focus":"descendant","lineStyle":{"width":2.5},
-                "itemStyle":{"color":"#f6bd16","borderColor":"#f6bd16"}},
-    "animationDuration":400,
-    "data":[{"name":"某模型","children":[
-      {"name":"关系A","children":[{"name":"对端模型1"},{"name":"对端模型2"}]},
-      {"name":"关系B","children":[{"name":"对端模型3"}]}
-    ]}]
-  }]
-}}
+{"type":"echart","preset":"tree","title":"某模型 · 关系图谱（N 条关系）","height":560,
+ "drill":{"key":"某模型"},
+ "tree":{"data":[{"name":"某模型","children":[
+   {"name":"关系A","children":[{"name":"对端模型1"}]},
+   {"name":"经中继模型链路","children":[{"name":"对端模型2"}]}
+ ]}]}}
 \`\`\`
 
-要点：顶层节点 = 所查模型；第二层 = 关系名称（多条关系对同一对端模型时合并为
-一个关系节点挂多个叶子）；叶子 = 对端模型名。数据缺失时不要编造关系。
-\`actionTemplate\` 是点击下钻桥：用户点图上任意节点，会以 [genui-action]
-"下钻模型：节点名" 发回给你——按 §5 处理。
+要点：顶层节点 = 所查模型；第二层 = 关系名称（同一对端模型多条关系合并到一个
+关系节点）；叶子 = 对端模型名。drill.key 固定用首图根模型名（双击下钻的
+合并路由靠它）。数据缺失时不要编造关系。
 
 ## 3. 字段下钻（model_field_list）
 

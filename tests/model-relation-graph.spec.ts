@@ -147,6 +147,31 @@ describe('model_relation_graph', () => {
     expect(hint).toContain('经XX链路')
   })
 
+  it('恰好 300 条关系：渲染指引行不被预览截断吞掉（H1）', async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: i === 0 ? '直接关系' : `间接关系${i}`,
+      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
+      rightModelName: i === 0 ? '设备基础模型' : `对端${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: rows } })
+    })
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.total).toBe(300)
+    expect(res.complete).toBe(true)
+    // 301 行（300 关系 + 1 指引行）必须全部进模型可见面
+    const { renderAskdataResult } = await import('../src/dsh/adapter.ts')
+    const text = renderAskdataResult({
+      success: true, toolName: 'model_relation_graph', apiOrSql: '', fields: [],
+      data: res.data, rowCount: res.rowCount, executionMs: 1, auditId: '',
+      total: res.total, complete: res.complete,
+    }, modelRelationGraphTool.previewLimit)
+    expect(text).not.toContain('truncatedPreview')
+    expect(text).toContain('【树形图渲染指引】')
+  })
+
   it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request) => jsonResponse(RELATION_ENVELOPE))
     const res = await modelRelationGraphTool.run(

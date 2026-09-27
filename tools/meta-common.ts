@@ -73,6 +73,36 @@ export function resolvePageSize(value: unknown, ctx: ToolContext): number {
   return Math.min(requested, ctx.config.query.rest.maxPageSize)
 }
 
+/**
+ * meta 查询片段护栏：`searchStr`/`whereStr`/`orderByStr`/`groupByStr` 是
+ * LLM 自由文本，由 AGP 服务端拼成 SQL 执行——必须与 SQL 通道同等设防
+ * （`;`/`--`/`/*` 断句与注释、以及 DML/DDL 关键字），否则提示词注入即可
+ * 让 AGP 执行写语句或全表扫描（`security.readOnly` 在这条链路上不经过）。
+ * 空串合法（接口要求"参数全传，值可空"）。
+ */
+const META_FRAGMENT_MAX = 1024
+const META_FORBIDDEN = [
+  ';', '--', '/*', '*/', '#',
+  'insert ', 'update ', 'delete ', 'drop ', 'truncate ', 'alter ', 'create ', 'grant ', 'exec',
+  'union ', 'sleep(', 'benchmark(', 'load_file', 'outfile', 'information_schema',
+] as const
+
+/** 校验一个 meta 查询片段；空串原样返回（接口的"可空"约定）。 */
+export function validateMetaFragment(value: unknown, field: string): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === '') return ''
+  if (text.length > META_FRAGMENT_MAX) {
+    throw askdataError('INVALID_PARAM', `${field} 长度超过 ${META_FRAGMENT_MAX}`)
+  }
+  const lower = text.toLowerCase()
+  for (const feature of META_FORBIDDEN) {
+    if (lower.includes(feature)) {
+      throw askdataError('INVALID_PARAM', `${field} 含有禁用片段 "${feature.trim()}"（只允许属性名/中文名与比较表达式）`)
+    }
+  }
+  return text
+}
+
 /** 分段定义入参解析：[{where_str, title}] → [{whereStr, title}]。 */
 export function parseSegments(value: unknown): Array<{ whereStr: string; title: string }> {
   if (!Array.isArray(value) || value.length === 0) {
@@ -80,7 +110,7 @@ export function parseSegments(value: unknown): Array<{ whereStr: string; title: 
   }
   return value.map((item, i) => {
     const seg = item as { where_str?: unknown; title?: unknown }
-    const whereStr = String(seg?.where_str ?? '').trim()
+    const whereStr = validateMetaFragment(seg?.where_str, `segment[${i}].where_str`)
     if (whereStr === '') throw askdataError('INVALID_PARAM', `segment[${i}].where_str 必填`)
     const title = String(seg?.title ?? '').trim() || `段${i + 1}`
     return { whereStr, title }

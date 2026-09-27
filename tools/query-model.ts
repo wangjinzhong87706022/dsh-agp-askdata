@@ -17,7 +17,7 @@ import { fail, ok } from '../src/result.ts'
 import { askdataError, AskdataError } from '../src/errors.ts'
 import type { ErrorCode } from '../src/errors.ts'
 import { metaBaseUrl, parseAgpEnvelope } from './model-relation-graph.ts'
-import { agpPost, describeEnvelope, resolvePageSize, validatePositiveInt } from './meta-common.ts'
+import { agpPost, describeEnvelope, resolvePageSize, validateMetaFragment, validatePositiveInt } from './meta-common.ts'
 
 /** query_model 工具定义。 */
 export const queryModelTool: AskdataTool = {
@@ -55,10 +55,10 @@ export const queryModelTool: AskdataTool = {
     try {
       if (ctx.signal?.aborted) throw askdataError('BACKEND_DOWN', '工具调用已被取消')
       const modelName = typeof args.model_name === 'string' ? args.model_name.trim() : ''
-      const searchStr = typeof args.search_str === 'string' ? args.search_str.trim() : ''
+      const searchStr = validateMetaFragment(args.search_str, 'search_str')
       if (modelName === '') throw askdataError('INVALID_PARAM', 'model_name 必填（中文模型名）')
       if (searchStr === '') throw askdataError('INVALID_PARAM', 'search_str 必填（显式属性名，先用 model_field_list 查可用字段；不要传 *）')
-      if (searchStr.trim() === '*') {
+      if (searchStr.split(',').some(part => part.trim() === '*')) {
         throw askdataError('INVALID_PARAM', 'search_str 不支持 *（服务端展开会含物理表不存在的列）；请用 model_field_list 查字段后显式列出')
       }
       if (!ctx.config.query.rest.baseUrl) {
@@ -73,11 +73,11 @@ export const queryModelTool: AskdataTool = {
       const body = {
         modelName,
         searchStr,
-        whereStr: typeof args.where_str === 'string' ? args.where_str.trim() : '',
+        whereStr: validateMetaFragment(args.where_str, 'where_str'),
         pageNum,
         pageSize,
-        orderByStr: typeof args.order_by_str === 'string' ? args.order_by_str.trim() : '',
-        groupByStr: typeof args.group_by_str === 'string' ? args.group_by_str.trim() : '',
+        orderByStr: validateMetaFragment(args.order_by_str, 'order_by_str'),
+        groupByStr: validateMetaFragment(args.group_by_str, 'group_by_str'),
       }
       urlLog.push(`${metaBase}/postModelDataMeta (modelName=${modelName})`)
       const env = parseAgpEnvelope(await agpPost(ctx, metaBase, '/postModelDataMeta', body))

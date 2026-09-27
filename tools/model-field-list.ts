@@ -36,9 +36,12 @@ function isModelNotFound(message: string): boolean {
 }
 
 /** model_field_list 工具定义。 */
+/** 安全上限：属性清单理论上界，超出即截断并置 complete=false。 */
+const FIELD_CAP = 300
+
 export const modelFieldListTool: AskdataTool = {
   name: 'model_field_list',
-  previewLimit: 300,
+  previewLimit: FIELD_CAP,
   description:
     '查询一个模型的基本属性（字段构成）：返回该模型的全部可用属性名、描述与类型码。'
     + '输入中文模型名（如 设备参数列模型、水泵模型、水库模型；也接受 class_path 形态）。'
@@ -83,7 +86,7 @@ export const modelFieldListTool: AskdataTool = {
         env = parseAgpEnvelope(text)
       }
 
-      const data: Record<string, unknown>[] = env.rows.map((row, i) => ({
+      const data: Record<string, unknown>[] = env.rows.slice(0, FIELD_CAP).map((row, i) => ({
         rank: i + 1,
         field_name: String(row.field_name ?? ''),
         field_description: String(row.field_description ?? ''),
@@ -106,7 +109,7 @@ export const modelFieldListTool: AskdataTool = {
         data,
         executionMs: Date.now() - started,
         total: env.rows.length,
-        complete: true,
+        complete: env.rows.length <= FIELD_CAP,
       })
       applyAudit(modelFieldListTool, args, ctx, apiOrSql, result, started, urlLog[0])
       return result
@@ -126,4 +129,3 @@ export const modelFieldListTool: AskdataTool = {
   },
 }
 
-export const MODEL_FIELD_LIST_FIELDS = FIELDS
