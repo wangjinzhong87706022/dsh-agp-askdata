@@ -237,6 +237,7 @@ describe('model_relation_graph', () => {
     const hintText = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
     // 关系是边不是节点：graph preset + links + 边 label
     expect(hintText).toContain('"preset":"graph"')
+    expect(hintText).toContain('"graphLayout":"hierarchy"')
     expect(hintText).toContain('"links":[')
     expect(hintText).toContain('"label":"关系A"')
     expect(hintText).toContain('关系是边不是节点')

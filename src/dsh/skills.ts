@@ -302,14 +302,15 @@ Y = 年聚合（1Y 走 WT_CUBE）
 
 \`\`\`dsh-ui
 {"type":"echart","preset":"graph","title":"某模型 · 关系图谱（N 条关系）","height":560,
- "drill":{"key":"某模型"},
+ "graphLayout":"hierarchy","drill":{"key":"某模型"},
  "data":[{"label":"某模型"},{"label":"对端模型1"},{"label":"对端模型2"}],
  "links":[{"from":"某模型","to":"对端模型1","label":"关系A"},
           {"from":"对端模型1","to":"对端模型2","label":"关系B"}]}
 \`\`\`
 
-要点：data 放全部出现过的模型（去重）；links 每行一条边，\`from\`/\`to\` 必须与
-data 里的 \`label\` 逐字一致，\`from\` = 起点（发起方），箭头方向即关系方向；
+要点：所查模型固定放 data 第一位（它是布局的根，图按层级向右展开、树状阅读）；
+data 放全部出现过的模型（去重）；links 每行一条边，\`from\`/\`to\` 必须与
+data 里的 \`label\` 逐字一致，\`from\` = 发起方，箭头方向即关系方向；
 同一对起终点有多条关系时各自成一条边（label 不同）。drill.key 固定用首图根模型名。
 数据缺失时不要编造关系。
 

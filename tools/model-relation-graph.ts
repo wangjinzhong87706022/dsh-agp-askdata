@@ -432,7 +432,8 @@ function renderHintRow(
     `① data 里放全部出现过的模型（去重）：data:[{"label":"模型名"}]；\n` +
     `② links 每行一条边：{"from":发起模型,"to":对端模型,"label":关系名称}，` +
     `from/to 必须与 data 里的 label 逐字一致（发起方在 from，箭头方向即关系方向）；\n` +
-    `③ 同一对起终点有多条关系时，各自成一条边（关系名不同，label 不同）。\n` +
+    `③ 同一对起终点有多条关系时，各自成一条边（关系名不同，label 不同）；\n` +
+    `④ 所查模型固定放 data 第一位（它是布局的根，图按层级向右展开，树状阅读）。\n` +
     `本次共 ${relationCount} 条关系，已展开到第 ${depthReached} 层。` +
     `\n图只基于上方数据绘制，不要自行补充、推断或反向任何关系。` +
     (fanoutCap !== null
@@ -465,7 +466,7 @@ function renderHintRow(
       `配色、箭头、边标签与单击下钻全部内置，不要自己补 option 或样式字段）：\n` +
       '```dsh-ui\n' +
       `{"type":"echart","preset":"graph","title":"${modelName} · 关系图谱（${relationCount} 条关系）","height":560,` +
-      `"drill":{"key":"${modelName}"},` +
+      `"graphLayout":"hierarchy","drill":{"key":"${modelName}"},` +
       `"data":[{"label":"${modelName}"},{"label":"对端模型1"},{"label":"对端模型2"}],` +
       `"links":[{"from":"${modelName}","to":"对端模型1","label":"关系A"},` +
       `{"from":"对端模型1","to":"对端模型2","label":"关系B"}]}\n` +
