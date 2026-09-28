@@ -58,7 +58,6 @@ describe('ASKDATA_SKILLS 常量', () => {
     for (const key of [
       'query.rest.maxPageSize',
       'query.meta.relationCap',
-      'query.meta.groupedHintThreshold',
       'query.meta.defaultPageSize',
       'system.defaultPreviewLimit',
       'toolsets.sql',

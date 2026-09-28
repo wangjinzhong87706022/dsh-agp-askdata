@@ -30,6 +30,7 @@ const CLASS_LIST_ENVELOPE = {
   },
 }
 
+// 服务端不按 modelName 过滤：末行是与查询模型无关的"全局关系尾巴"，工具层应剔除。
 const RELATION_ENVELOPE = {
   code: 0,
   message: 'success',
@@ -42,7 +43,7 @@ const RELATION_ENVELOPE = {
       { name: 'rightModelName', title: '右模型名称', type: '3' },
     ],
     data: [
-      { id: 10000000062, relation_name: 'outterLink_[wt_elm_devclassify]_[wt_elm_equipment]', relation_description: '设备分组和设备的关系', leftModelName: '设备基础模型', rightModelName: '设备分组模型' },
+      { id: 10000000062, relation_name: 'subLink_[wt_10462_shuibengmoxing]_[code]_[wt_1_shebeicanshuliemoxing]', relation_description: '水泵参数列表', leftModelName: '水泵模型', rightModelName: '设备参数列模型' },
       { id: 10000003038, relation_name: 'outterLink_[wt_elm_equipment]_[wt_egy_energy]', relation_description: '设备与能源的关系', leftModelName: '设备基础模型', rightModelName: '能源基础模型' },
     ],
   },
@@ -50,7 +51,7 @@ const RELATION_ENVELOPE = {
 
 function ctxOf(
   fetchImpl: (url: string | URL | Request) => Promise<Response>,
-  meta?: Partial<{ relationCap: number; groupedHintThreshold: number }>,
+  meta?: Partial<{ relationCap: number }>,
 ): ToolContext {
   const config = resolveConfig({
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
@@ -95,7 +96,7 @@ describe('decodeAgpEnvelope helpers', () => {
 })
 
 describe('model_relation_graph', () => {
-  it('两步主链：中文名 → queryByGenericSql 解析 class_path → getRelationsByModel → 关系清单 + 渲染指引（双击下钻常开）', async () => {
+  it('两步主链：中文名 → queryByGenericSql 解析 class_path → getRelationsByModel → 关系清单 + 渲染指引（单击下钻常开）', async () => {
     const calls: string[] = []
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       const u = String(url)
@@ -111,79 +112,86 @@ describe('model_relation_graph', () => {
     expect(res.success).toBe(true)
     expect(calls).toHaveLength(2)
     expect(calls[0]).toContain('queryByGenericSql')
-    expect(res.rowCount).toBe(3) // 2 条关系 + 1 行渲染指引
-    expect(res.total).toBe(2)
+    // 2 条返回里 1 条是无关尾巴 → 只留 1 条直接关系 + 1 行渲染指引
+    expect(res.rowCount).toBe(2)
+    expect(res.total).toBe(1)
     expect(res.complete).toBe(true)
-    expect(res.data[0]!.relation_description).toBe('设备分组和设备的关系')
-    expect(res.data[0]!.rightModelName).toBe('设备分组模型')
-    // direct 标记：查询模型（水泵模型）不是这两条关系的端点 → 否
-    expect(res.data[0]!.direct).toBe('否')
-    expect(res.data[1]!.direct).toBe('否')
+    expect(res.data[0]!.relation_description).toBe('水泵参数列表')
+    expect(res.data[0]!.rightModelName).toBe('设备参数列模型')
+    expect(res.data[0]!.direct).toBe('是')
+    expect(res.apiOrSql).toContain('已剔除 1 条无关关系')
     const hint = res.data.at(-1)!
     expect(String(hint.relation_description)).toContain('渲染指引')
     const hintText = String((hint as Record<string, unknown>).hint)
-    // 双击下钻常开：模板只带 drill.key，actionTemplate 用渲染器默认值（少抄一个字段）
+    // 单击下钻常开：模板只带 drill.key，actionTemplate 用渲染器默认值（少抄一个字段）
     expect(hintText).not.toContain('actionTemplate')
-    expect(hintText).toContain('双击')
+    expect(hintText).toContain('单击')
+    expect(hintText).not.toContain('双击')
     expect(hintText).toContain('"preset":"tree"')
     expect(hintText).toContain('"drill":{"key":"水泵模型"}')
-    expect(hintText).toContain('水泵模型')
     expect(hintText).toContain('[genui-action]')
-    // patch 协议 + drill key + 关闭节点收起（浏览点击不再误触下钻）
+    // patch 协议 + drill key
     expect(hintText).toContain('drillPatch')
     expect(hintText).toContain('幂等检查')
+    // 叶子取"非本模型"那一端，并告知剔除了多少条
+    expect(hintText).toContain('leftModelName 等于本模型则取 rightModelName')
+    expect(hintText).toContain('混了 1 条与本模型无关的全局关系')
   })
 
-  it('直接关系标记与超阈值分组指引：direct=是 + >40 行时指引切换为聚合', async () => {
-    const manyRows = Array.from({ length: 45 }, (_, i) => ({
-      relation_name: `r${i}`,
-      relation_description: i === 0 ? '直接关系甲' : `间接关系${i}`,
-      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
-      rightModelName: i === 0 ? '设备基础模型' : `对端模型${i}`,
+  it('服务端关系尾巴按端点过滤：只留本模型为端点的行（两个模型不再画出同一张图）', async () => {
+    // 复刻 2026-09-28 实测形态：50 条里只有前几条是本模型的直接关系，其余是
+    // 无关的全局关系（工作计划/组织/职工…）。关键在于**无关尾巴对两个模型是同一
+    // 批**（实测返回集交集 49/49）——这正是两个模型画出同一张图的根因。
+    const TAIL = Array.from({ length: 45 }, (_, i) => ({
+      relation_name: `global_r${i}`,
+      relation_description: `全局无关关系${i}`,
+      leftModelName: i % 2 === 0 ? '工作计划模型' : '组织基础模型',
+      rightModelName: i % 2 === 0 ? '工作任务模型' : '角色模型',
     }))
-    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
-      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
-    })
-    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
-    expect(res.success).toBe(true)
-    expect(res.total).toBe(45)
-    expect(res.complete).toBe(true)
-    const rows = res.data.slice(0, 45)
-    expect(rows[0]!.direct).toBe('是') // 查询模型是端点
-    expect(rows[1]!.direct).toBe('否')
-    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
-    expect(hint).toContain('直接 1 条 + 间接 44 条')
-    expect(hint).toContain('按中继模型')
-    expect(hint).toContain('经XX链路')
-  })
-
-  it('分组渲染阈值走 config.query.meta.groupedHintThreshold', async () => {
-    const manyRows = Array.from({ length: 45 }, (_, i) => ({
-      relation_name: `r${i}`,
-      relation_description: i === 0 ? '直接关系甲' : `间接关系${i}`,
-      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
-      rightModelName: i === 0 ? '设备基础模型' : `对端模型${i}`,
-    }))
-    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
-      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
-    })
-    // 阈值调到 100 → 45 条不再触发分组指引
-    const res = await modelRelationGraphTool.run(
-      { model_name: '水泵模型' },
-      ctxOf(fetchImpl as unknown as typeof fetch, { groupedHintThreshold: 100 }),
-    )
-    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
-    expect(hint).not.toContain('按中继模型')
-    expect(hint).toContain('第二层 = 关系名')
+    const build = (alias: string, directCount: number) => [
+      ...Array.from({ length: directCount }, (_, i) => ({
+        relation_name: `${alias}_r${i}`,
+        relation_description: `${alias}直接关系${i}`,
+        leftModelName: alias,
+        rightModelName: `对端${i}`,
+      })),
+      ...TAIL,
+    ]
+    const runOne = async (alias: string, rows: ReturnType<typeof build>): Promise<{ descs: string[]; hint: string; api: string }> => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+        if (String(url).includes('queryByGenericSql')) {
+          return jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [{ class_alias: alias, class_name: 'x', class_path: `p_${alias}` }] } })
+        }
+        return jsonResponse({ code: 0, message: 'success', data: { field: [], data: rows } })
+      })
+      const res = await modelRelationGraphTool.run({ model_name: alias }, ctxOf(fetchImpl as unknown as typeof fetch))
+      expect(res.success).toBe(true)
+      const descs = res.data.slice(0, -1).map((r) => String(r.relation_description))
+      return { descs, hint: String((res.data.at(-1) as unknown as Record<string, unknown>).hint), api: res.apiOrSql }
+    }
+    const a = await runOne('水泵模型', build('水泵模型', 12))
+    const b = await runOne('建筑模型', build('建筑模型', 2))
+    // 前提坐实：不过滤的话两模型返回值交集 = 45/45，就是"两张一样的图"
+    const shared = build('水泵模型', 12).map((r) => r.relation_description)
+      .filter((d) => build('建筑模型', 2).some((r) => r.relation_description === d))
+    expect(shared).toHaveLength(45)
+    // 过滤后：各留各的直接关系
+    expect(a.descs).toHaveLength(12)
+    expect(b.descs).toHaveLength(2)
+    // 两张图不再有共同关系——这正是用户报的现象的判据
+    expect(a.descs.filter((d) => b.descs.includes(d))).toHaveLength(0)
+    expect(a.api).toContain('已剔除 45 条无关关系')
+    expect(b.api).toContain('已剔除 45 条无关关系')
+    // 过滤后全是直接关系：不再有「经XX链路」间接分组那套规则
+    expect(a.hint).not.toContain('经XX链路')
+    expect(a.hint).not.toContain('间接')
   })
 
   it('安全截断上限走 config.query.meta.relationCap（超出即 complete=false）', async () => {
     const rows = Array.from({ length: 12 }, (_, i) => ({
       relation_name: `r${i}`,
       relation_description: `关系${i}`,
-      leftModelName: '设备基础模型',
+      leftModelName: '水泵模型',
       rightModelName: `对端${i}`,
     }))
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
@@ -201,34 +209,100 @@ describe('model_relation_graph', () => {
     expect(modelRelationGraphTool.previewLimit as number).toBeGreaterThan(5)
   })
 
-  it('class_path 入参：direct 判定不可信，标"无法判定"且不给直接/间接分组指引（L6）', async () => {
-    const manyRows = Array.from({ length: 45 }, (_, i) => ({
-      relation_name: `r${i}`,
-      relation_description: `关系${i}`,
-      leftModelName: '设备基础模型',
-      rightModelName: `对端模型${i}`,
-    }))
-    const fetchImpl = vi.fn(async () =>
-      jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } }))
+  it('class_path 入参：先反查 class_alias 拿中文名，过滤照常生效', async () => {
+    const calls: string[] = []
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url)
+      calls.push(u)
+      if (u.includes('queryByGenericSql')) {
+        // 反查 SQL 按 class_path 走，能拿回中文名
+        expect(u).toBe('https://www.openagp.top:9080/s1M6_uE9/wz/meta/model/queryByGenericSql')
+        return jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [{ class_alias: '水泵模型', class_name: 'x', class_path: 'wt_10462_shuibengmoxing' }] } })
+      }
+      return jsonResponse(RELATION_ENVELOPE)
+    })
     const res = await modelRelationGraphTool.run(
-      { model_name: 'wt_elm_equipment/wt_10462_shuibengmoxing' },
+      { model_name: 'wt_10462_shuibengmoxing' },
       ctxOf(fetchImpl as unknown as typeof fetch),
     )
     expect(res.success).toBe(true)
+    expect(calls).toHaveLength(2) // 反查 + 关系查询
+    expect(res.data[0]!.direct).toBe('是')
+    expect(res.data[0]!.relation_description).toBe('水泵参数列表')
+    expect(res.apiOrSql).toContain('已剔除 1 条无关关系')
+  })
+
+  it('class_path 反查不到中文名：原样透出 + 指引要求只画本模型为端点的关系', async () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: `关系${i}`,
+      leftModelName: '水泵模型',
+      rightModelName: `对端${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) {
+        return jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [] } })
+      }
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: rows } })
+    })
+    const res = await modelRelationGraphTool.run(
+      { model_name: 'wt_unknown_path' },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res.success).toBe(true)
+    expect(res.total).toBe(5) // 没法判定就全给，不误报 0 条
     expect(res.data[0]!.direct).toBe('无法判定')
+    expect(res.apiOrSql).toContain('无法按端点过滤')
     const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
-    // 不能出现"直接 0 条 + 间接 45 条"这类基于不可信 direct 的分组结论
-    expect(hint).not.toContain('直接 0 条')
-    expect(hint).not.toContain('按中继模型')
-    expect(hint).toContain('direct 列一律为"无法判定"')
+    expect(hint).toContain('只画以本模型为端点的关系')
+  })
+
+  it('有返回但无一条以本模型为端点：明确说"没有直接关系"而非"返回 0 行"', async () => {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      relation_name: `r${i}`,
+      relation_description: `全局关系${i}`,
+      leftModelName: '其他模型',
+      rightModelName: `别模型${i}`,
+    }))
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
+      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: rows } })
+    })
+    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
+    expect(res.success).toBe(true)
+    expect(res.rowCount).toBe(1)
+    expect(String(res.data[0]!.relation_description)).toContain('没有直接关系')
+    expect(String(res.data[0]!.relation_description)).toContain('服务端未按 modelName 过滤')
+  })
+
+  it('非法字符在两种入参形态下都被拒，不触网', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(RELATION_ENVELOPE))
+    // 无 "/"：中文名白名单（CLASS_ALIAS_RE）拒绝
+    const res1 = await modelRelationGraphTool.run(
+      { model_name: "wt_x'-- y" },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res1.success).toBe(false)
+    expect(res1.errorCode).toBe('INVALID_PARAM')
+    expect(res1.errorMessage).toContain('模型名含非法字符')
+    // 有 "/"：当 class_path 处理，CLASS_PATH_RE 预检拒绝——引号绝不进 SQL
+    const res2 = await modelRelationGraphTool.run(
+      { model_name: "wt_x/';--" },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res2.success).toBe(false)
+    expect(res2.errorCode).toBe('INVALID_PARAM')
+    expect(res2.errorMessage).toContain('不存在')
+    expect(res2.errorMessage).toContain('class_path')
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('恰好 300 条关系：渲染指引行不被预览截断吞掉（H1）', async () => {
     const rows = Array.from({ length: 300 }, (_, i) => ({
       relation_name: `r${i}`,
-      relation_description: i === 0 ? '直接关系' : `间接关系${i}`,
-      leftModelName: i === 0 ? '水泵模型' : '设备基础模型',
-      rightModelName: i === 0 ? '设备基础模型' : `对端${i}`,
+      relation_description: `关系${i}`,
+      leftModelName: i % 2 === 0 ? '水泵模型' : `对端${i}`,
+      rightModelName: i % 2 === 0 ? `对端${i}` : '水泵模型',
     }))
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
@@ -248,50 +322,65 @@ describe('model_relation_graph', () => {
     expect(text).toContain('【树形图渲染指引】')
   })
 
-  it('groupedHintThreshold=0 = 永不切换分组（H-1：文档语义与实现对齐）', async () => {
-    const manyRows = Array.from({ length: 45 }, (_, i) => ({
-      relation_name: `r${i}`, relation_description: `关系${i}`,
-      leftModelName: i === 0 ? '水泵模型' : '设备基础模型', rightModelName: `对端${i}`,
-    }))
-    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).includes('queryByGenericSql')) return jsonResponse(CLASS_LIST_ENVELOPE)
-      return jsonResponse({ code: 0, message: 'success', data: { field: [], data: manyRows } })
-    })
-    const config = resolveConfig({
-      connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
-      query: {
-        rest: { baseUrl: 'https://www.openagp.top:9080/s1M6_uE9/wz/iot-etl/iot', wtAppid: '10462', wtOpenid: 'o', wtToken: 't', fallbackToSql: false, maxPageSize: 1000 },
-        meta: { groupedHintThreshold: 0 },
-      },
-    })
-    const executor = { execute: async () => ({ columns: [], rows: [] }) }
-    const ctx = { config, executor, mysqlExecutor: executor, fetchImpl: fetchImpl as unknown as typeof fetch }
-    const res = await modelRelationGraphTool.run({ model_name: '水泵模型' }, ctx)
-    const hint = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
-    expect(hint).not.toContain('直接 1 条')  // 分组文案特有
-    expect(hint).not.toContain('按中继模型')
-    expect(hint).toContain('data 构造规则：第二层 = 关系名')  // 普通规则文案
-  })
-
-  it('class_path 直传（含 /）：跳过解析步骤，一次 GET', async () => {
-    const fetchImpl = vi.fn(async (url: string | URL | Request) => jsonResponse(RELATION_ENVELOPE))
+  it('class_path 直传（含 /）：反查 + 关系查询两步，不再是一次 GET', async () => {
+    const fetchImpl = vi.fn(async (url: string | URL | Request) =>
+      String(url).includes('queryByGenericSql')
+        ? jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [{ class_alias: '水泵模型', class_name: 'x', class_path: 'wt_10462_shuibengmoxing' }] } })
+        : jsonResponse(RELATION_ENVELOPE))
     const res = await modelRelationGraphTool.run(
-      { model_name: 'wt_elm_equipment/wt_10462_shuibengmoxing' },
+      { model_name: 'wt_10462_shuibengmoxing' },
       ctxOf(fetchImpl as unknown as typeof fetch),
     )
     expect(res.success).toBe(true)
     const calls = (fetchImpl as unknown as { mock: { calls: Array<[string]> } }).mock.calls
-    expect(calls).toHaveLength(1)
-    expect(String(calls[0]![0])).toContain('modelName=wt_elm_equipment%2Fwt_10462_shuibengmoxing')
+    expect(calls).toHaveLength(2)
+    expect(String(calls[1]![0])).toContain('modelName=wt_10462_shuibengmoxing')
   })
 
-  it('中文名未命中：INVALID_PARAM 提示确认模型名', async () => {
+  it('中文名未命中且不是合法 class_path 形态：INVALID_PARAM 提示确认模型名', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [] } }))
     const res = await modelRelationGraphTool.run({ model_name: '不存在的模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
     expect(res.success).toBe(false)
     expect(res.errorCode).toBe('INVALID_PARAM')
     expect(res.errorMessage).toContain('不存在的模型')
     expect(res.errorMessage).toContain('class_alias')
+    // 只查了 alias 一次就拒了——非法输入绝不进 SQL
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('中文名未命中但形态合法：回落按 class_path 查（覆盖单段无斜杠的真实 class_path）', async () => {
+    const calls: string[] = []
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url)
+      calls.push(u)
+      if (u.includes('queryByGenericSql')) {
+        // 第一次按 class_alias 查（"wt_elm_equipment" 也是合法 alias 形态）→ 空；
+        // 第二次按 class_path 查 → 命中，且带回中文别名
+        return calls.length === 1
+          ? jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [] } })
+          : jsonResponse({ code: '0', msg: '成功', data: { field: [], data: [{ class_alias: '设备基础模型', class_name: 'wt_elm_equipment', class_path: 'wt_elm_equipment' }] } })
+      }
+      return jsonResponse({
+        code: 0, message: 'success',
+        data: {
+          field: [],
+          data: [
+            { relation_name: 'a', relation_description: '设备与能源的关系', leftModelName: '设备基础模型', rightModelName: '能源基础模型' },
+            { relation_name: 'b', relation_description: '无关关系', leftModelName: '组织基础模型', rightModelName: '角色模型' },
+          ],
+        },
+      })
+    })
+    const res = await modelRelationGraphTool.run(
+      { model_name: 'wt_elm_equipment' },
+      ctxOf(fetchImpl as unknown as typeof fetch),
+    )
+    expect(res.success).toBe(true)
+    expect(calls.filter((u) => u.includes('queryByGenericSql'))).toHaveLength(2)
+    // 反查到的中文名让端点过滤生效：无关那条被剔除
+    expect(res.data).toHaveLength(2) // 1 条关系 + 指引行
+    expect(res.data[0]!.relation_description).toBe('设备与能源的关系')
+    expect(res.apiOrSql).toContain('「设备基础模型」')
   })
 
   it('空关系：明确"无关系"行，不生成渲染指引', async () => {

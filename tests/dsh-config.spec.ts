@@ -115,7 +115,7 @@ describe('配置页默认值可装配', () => {
 
   it('meta 面阈值与预览缺省行数随配置下发，缺省值与文档一致', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    expect(service.config.query.meta).toEqual({ relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 })
+    expect(service.config.query.meta).toEqual({ relationCap: 300, defaultPageSize: 100, fieldCap: 300 })
     expect(service.config.system.defaultPreviewLimit).toBe(20)
   })
 
@@ -123,7 +123,7 @@ describe('配置页默认值可装配', () => {
     const cfg = defaultConfig()
     cfg.query.meta = { ...cfg.query.meta, relationCap: 50 }
     const service = createAskdataService(toRuntimeConfig(cfg))
-    expect(service.config.query.meta).toEqual({ relationCap: 50, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 })
+    expect(service.config.query.meta).toEqual({ relationCap: 50, defaultPageSize: 100, fieldCap: 300 })
   })
 
   it('阈值加载期校验：maxPageSize / meta 阈值 / 预览缺省必须是 ≥1 整数', () => {
@@ -137,11 +137,8 @@ describe('配置页默认值可装配', () => {
       .toThrow(/query\.meta\.relationCap/)
     expect(() => createAskdataService({ connection: conn, query: { meta: { defaultPageSize: -1 } } }))
       .toThrow(/query\.meta\.defaultPageSize/)
-    expect(() => createAskdataService({ connection: conn, query: { meta: { groupedHintThreshold: -1 } } }))
-      .toThrow(/query\.meta\.groupedHintThreshold/)
-    // groupedHintThreshold = 0 是合法部署（永不切换分组指引）
-    expect(createAskdataService({ connection: conn, query: { meta: { groupedHintThreshold: 0 } } })
-      .config.query.meta.groupedHintThreshold).toBe(0)
+    expect(() => createAskdataService({ connection: conn, query: { meta: { fieldCap: 0 } } }))
+      .toThrow(/query\.meta\.fieldCap/)
     expect(() => createAskdataService({ connection: conn, system: { defaultPreviewLimit: 0 } }))
       .toThrow(/system\.defaultPreviewLimit/)
   })

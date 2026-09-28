@@ -938,7 +938,7 @@ meta 数据查询族自此断档。
 
 | 场景 | 工具 | 设计 |
 |---|---|---|
-| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | 模型可见预览上限远大于安全截断上限（`previewLimit` 常量 1000 vs `query.meta.relationCap` 300，两者取 min 生效，超限 complete=false）；模型面全量返回；关系行带 `direct` 标记（查询模型是端点=直接关系，API 会返回经链路展开的间接关系；**class_path 入参时标记为"未知"且不给分组指引**——端点名与 class_path 不可比）；关系数 >`query.meta.groupedHintThreshold`（默认 40）时渲染指引切换为"直接展开 + 间接按对端模型聚合计数" |
+| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | 模型可见预览上限远大于安全截断上限（`previewLimit` 常量 1000 vs `query.meta.relationCap` 300，两者取 min 生效，超限 complete=false）；模型面全量返回。**model_relation_graph 需按端点过滤**：服务端 `getRelationsByModel` 不按 `modelName` 过滤（2026-09-28 实测：设备基础模型 12/50、建筑基础模型 2/50 为真正直接关系，两模型返回集交集 49/49；`pageSize` 传 500/2000 均只回 50 行，`page` 恒 undefined），工具层用 `direct` 判定（端点名 == 模型中文名）剔掉尾巴，剔除条数记进 `apiOrSql` 与渲染指引；**class_path 入参先反查 `class_alias` 拿中文名**（`queryByGenericSql` 按 `class_path` 反查），反查不到则原样透出并要求模型只画以本模型为端点的关系。过滤后全部是直接关系，故无「间接链路」分组指引，`query.meta.groupedHintThreshold` 随之删除；`total` 报过滤后条数 |
 | 无界业务数据 | query_model | 保留分页；`page.itemTotal` 顶层透出为 `total`，单页即全量时 `complete=true`；description 教"total 超一页先收窄 where_str 或改用 query_model_segment，不要逐页翻" |
 | 聚合统计 | query_model_segment / query_relation_segment | 输出天然小，同样透出 total/complete |
 
@@ -949,17 +949,24 @@ SQL 行查询面不受影响）。反面清单：不给元数据工具暴露分�
 不为"完整性"把几千宽行灌进上下文（那才是 token 预算敏感区）。所有阈值一律走
 `src/config.ts`（AGENTS.md：实现内不得有第二套默认值），加载期做正整数断言。
 
-#### 20.4.2 双击下钻（默认开启，2026-09-25）
+#### 20.4.2 单击下钻（默认开启，2026-09-28）
 
-**双击**图上任意节点 → `[genui-action] "下钻模型：X"` → 模型回 `drillPatch` 增量
-并入原图（客户端乐观占位 + 单飞串行队列 + 同名去重）。单击保留给 echarts 原生
-收起/展开与 roam 拖拽浏览，两种交互互不干扰，无需配置开关。
+**单击**图上任意节点 → `[genui-action] "下钻模型：X"` → 模型回 `drillPatch`，
+在本次回答里就地渲染成一棵独立子树图（客户端乐观占位 + 单飞串行队列 + 同名去重）。
+拖拽缩放与悬停高亮不受影响，无需配置开关。
 
 - 模板由渲染指引内联下发（`drill.key` = 首图根模型名）；`actionTemplate` 不再
   要求模型抄写——drill 存在时客户端使用内置默认模板 `下钻模型：{name}`。
-- patch 协议：幂等检查（已展开直接一句回复）→ 只发新增子树 → 并入首图。
-- 历史：曾以单击触发 + `query.chartDrillInteraction` 开关控制（默认关），因
-  浏览误触成本高改为双击常开，该配置已移除。
+- patch 协议：幂等检查（已展开直接一句回复）→ 只发新增子树 → 就地展开成新图。
+  不并回首图：首图在对话上方，并入会让它膨胀且要往上翻才能看到更新。
+- **为什么是单击而不是双击**（2026-09-28 实测修复）：ECharts 树图每次单击都会
+  toggle 子树并触发重绘，双击的第二次点击落在重排后的新位置上，`dblclick` 序列
+  判定失败——drill 绑 dblclick 时**永远不触发**（用户报"双击没反应"）。修法是
+  在 `treeOption` 里设 `expandAndCollapse: false` 把折叠关掉，单击全部让位给下钻；
+  树本来就 `initialTreeDepth: -1` 全展开，折叠对读者没有价值。绑定事件统一 `click`。
+- 历史：更早曾以单击触发 + `query.chartDrillInteraction` 开关控制（默认关），
+  2026-09-25 改为双击常开（意图是"让出单击给折叠"），2026-09-28 因上述失效
+  改回单击并关闭折叠，该配置已移除。
 
 ## 21. 工具组开关与双 preset（部署形态隔离，2026-09-23）
 

@@ -79,11 +79,6 @@ export interface MetaQueryLimits {
    * `complete=false`（有界清单，正常远小于此）。
    */
   relationCap: number
-  /**
-   * 分组渲染阈值：关系数多于此值时，渲染指引切换为"直接展开 + 间接聚合计数"。
-   * 仅在 direct 判定可信（中文模型名入参）时生效，见 tools/model-relation-graph.ts。
-   */
-  groupedHintThreshold: number
   /** meta 查询族（query_model / *_segment 等）未显式传 page_size 时的默认单页行数。 */
   defaultPageSize: number
   /**
@@ -322,7 +317,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     tsdbChannel: 'sql',
     rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true, maxPageSize: 1000 },
     // meta 面阈值：关系图谱安全上限 / 分组渲染阈值 / 默认单页行数。
-    meta: { relationCap: 300, groupedHintThreshold: 40, defaultPageSize: 100, fieldCap: 300 },
+    meta: { relationCap: 300, defaultPageSize: 100, fieldCap: 300 },
     useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
@@ -447,10 +442,6 @@ export function resolveConfig(input: AskdataConfigInput): AskdataConfig {
   assertPositiveInt(query.meta.relationCap, 'query.meta.relationCap')
   assertPositiveInt(query.meta.defaultPageSize, 'query.meta.defaultPageSize')
   assertPositiveInt(query.meta.fieldCap, 'query.meta.fieldCap')
-  // groupedHintThreshold 允许 0（"永不切换分组指引" 是合法部署），只校验整数形态。
-  if (!Number.isInteger(query.meta.groupedHintThreshold) || query.meta.groupedHintThreshold < 0) {
-    throw new Error(`配置错误：query.meta.groupedHintThreshold 必须是 ≥0 的整数，收到: ${String(query.meta.groupedHintThreshold)}`)
-  }
   assertPositiveInt(system.defaultPreviewLimit, 'system.defaultPreviewLimit')
 
   const knowledge = resolveKnowledgeConfig(input.knowledge)
