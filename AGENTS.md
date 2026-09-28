@@ -2,6 +2,13 @@
 
 本仓库是 dsh-agp-askdata：AGP TSDB/Database 智能问数的 DSH 插件。
 
+## Git 推送规则
+
+- **本仓库**推 `origin` = `https://github.com/wangjinzhong87706022/dsh-agp-askdata.git`。
+- **姊妹仓 dsh-genui**（E:\git\dsh-genui，genui 渲染插件）推 `fork` = `https://github.com/wangjinzhong87706022/dsh-genui.git`；其 `origin`（omdsh-dev/dsh-genui）是上游、无写权限（403），**永不向 origin 推送**。
+- 推送走代理 `HTTPS_PROXY=http://127.0.0.1:7897` + `http.sslBackend=schannel`；代理节点对上传流会停摆（GET 正常、push 卡死），用重试循环：`timeout 100 git -c http.sslBackend=schannel -c http.lowSpeedLimit=1 -c http.lowSpeedTime=45 push <remote> main`，失败重试，最多 6 次。
+- 两仓联动：askdata 的渲染协议改动（dsh-ui 围栏/drill 字段）必须与 genui 同步，提交推送成对进行。
+
 ## 硬性约束
 
 - **只读系统**：任何代码不得生成或执行写语句（INSERT/UPDATE/DELETE/DDL）。`security.readOnly` 在 P0 不允许关闭。
