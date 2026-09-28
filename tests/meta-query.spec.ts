@@ -303,11 +303,36 @@ describe('meta 查询片段护栏（B1/B2：自由 SQL 文本不得直发服务�
   const ctx = () => ctxOf(async () => jsonResponse(MODEL_DATA_ENVELOPE))
 
   it('search_str 含注入片段 → INVALID_PARAM（; -- /* 与 DML/DDL 关键字）', async () => {
-    for (const payload of ['id; drop table x', 'id -- c', 'id /* c */', "id union select 1", 'id, load_file(1)']) {
+    for (const payload of ['id; drop table x', 'id -- c', 'id /* c */', 'id union select 1', 'id, load_file(1)']) {
       const res = await queryModelTool.run({ model_name: 'X', search_str: payload }, ctx())
       expect(res.success).toBe(false)
       expect(res.errorCode).toBe('INVALID_PARAM')
     }
+  })
+
+  it('词边界不误伤合法属性名与值内标点（评审 M-1）', async () => {
+    for (const payload of [
+      'execute_flag = 1',            // 旧行为误杀（exec 子串）
+      'node_exec > 0',               // 同上
+      "name = '1#机组'",              // 值内 #（字面量剥离）
+      "remark = 'a;b'",              // 值内 ;（字面量剥离）
+    ]) {
+      const res = await queryModelTool.run({ model_name: 'X', search_str: 'id', where_str: payload }, ctx())
+      expect(res.success).toBe(true)
+    }
+  })
+
+  it('空白折叠防绕过：tab/换行分隔的关键字仍被拦截（评审 M-2）', async () => {
+    for (const payload of ['id union\tselect 1', 'id drop\ntable x', 'id sleep (5)']) {
+      const res = await queryModelTool.run({ model_name: 'X', search_str: 'id', where_str: payload }, ctx())
+      expect(res.success).toBe(false)
+    }
+  })
+
+  it('引号逃逸为已知残留（如实固定行为，纵深依赖项目隔离）', async () => {
+    const res = await queryModelTool.run({ model_name: 'X', search_str: 'id', where_str: "id' or '1'='1" }, ctx())
+    // denylist 结构性挡不住引号逃逸——护栏是防呆层，纵深靠 AGP 项目隔离
+    expect(res.success).toBe(true)
   })
 
   it('where/order/group 同等设防；空串仍合法（接口"参数全传、值可空"）', async () => {

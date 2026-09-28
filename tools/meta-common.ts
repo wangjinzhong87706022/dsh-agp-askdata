@@ -106,18 +106,43 @@ export function resolvePageSize(value: unknown, ctx: ToolContext): number {
 }
 
 /**
- * meta 查询片段护栏：`searchStr`/`whereStr`/`orderByStr`/`groupByStr` 是
- * LLM 自由文本，由 AGP 服务端拼成 SQL 执行——必须与 SQL 通道同等设防
- * （`;`/`--`/`/*` 断句与注释、以及 DML/DDL 关键字），否则提示词注入即可
- * 让 AGP 执行写语句或全表扫描（`security.readOnly` 在这条链路上不经过）。
- * 空串合法（接口要求"参数全传，值可空"）。
+ * meta 查询片段护栏（防呆层，非 SQL 解析器）：`searchStr`/`whereStr`/
+ * `orderByStr`/`groupByStr` 是 LLM 自由文本，由 AGP 服务端拼成 SQL 执行。
+ *
+ * 三道检查（2026-09-27 重写，修正评审 M-1 误杀与 M-2 空白绕过）：
+ * 1. 引号内字面量剥离——引号内的 `;`/`#`/`--` 是合法数据值（备注='a;b'、
+ *    名称='1#机组'），只有字面量外的断句/注释符才拒绝；
+ * 2. 空白折叠——`\t\r\n` 折叠为空格，防 `union\tselect` 绕过带空格关键字；
+ * 3. 断句/注释符 + DML/DDL/危险关键字按词边界匹配——`exec` 不再误杀
+ *    `execute_flag`/`node_exec`，`update ` 系带尾空格的旧写法一并废除。
+ *
+ * 诚实边界：引号逃逸注入（`id' or '1'='1`）在 denylist 框架内结构性无解
+ * （`or` 是合法 SQL 连接词），本护栏是防呆层而非解析器；纵深依赖 AGP 按
+ * 项目隔离与只读账号。空串合法（接口要求"参数全传，值可空"）。
  */
 const META_FRAGMENT_MAX = 1024
-const META_FORBIDDEN = [
-  ';', '--', '/*', '*/', '#',
-  'insert ', 'update ', 'delete ', 'drop ', 'truncate ', 'alter ', 'create ', 'grant ', 'exec',
-  'union ', 'sleep(', 'benchmark(', 'load_file', 'outfile', 'information_schema',
-] as const
+
+/** 字面量外的断句/注释/井号（引号内的属合法数据值）。 */
+const META_PUNCTUATION = [';', '--', '/*', '*/', '#'] as const
+/** 危险关键字（词边界匹配，大小写不敏感）。 */
+const META_KEYWORD_RE =
+  /\b(insert|update|delete|drop|truncate|alter|create|grant|exec|union|sleep|benchmark|load_file|outfile|information_schema)\b/i
+
+/** 剥离 '…' / "…" 字面量（含引号），处理 \' \\ 转义；未闭合引号原样返回。 */
+function stripQuotedLiterals(text: string): string {
+  let out = ''
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  for (const ch of text) {
+    if (escaped) { escaped = false; continue }
+    if ((inSingle || inDouble) && ch === '\\') { escaped = true; continue }
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue }
+    if (!inSingle && !inDouble) out += ch
+  }
+  return out
+}
 
 /** 校验一个 meta 查询片段；空串原样返回（接口的"可空"约定）。 */
 export function validateMetaFragment(value: unknown, field: string): string {
@@ -126,11 +151,14 @@ export function validateMetaFragment(value: unknown, field: string): string {
   if (text.length > META_FRAGMENT_MAX) {
     throw askdataError('INVALID_PARAM', `${field} 长度超过 ${META_FRAGMENT_MAX}`)
   }
-  const lower = text.toLowerCase()
-  for (const feature of META_FORBIDDEN) {
-    if (lower.includes(feature)) {
-      throw askdataError('INVALID_PARAM', `${field} 含有禁用片段 "${feature.trim()}"（只允许属性名/中文名与比较表达式）`)
+  const stripped = stripQuotedLiterals(text).replace(/[\t\r\n\f\v]+/g, ' ').toLowerCase()
+  for (const feature of META_PUNCTUATION) {
+    if (stripped.includes(feature)) {
+      throw askdataError('INVALID_PARAM', `${field} 含有禁用片段 "${feature}"（若为数据值请放入引号内）`)
     }
+  }
+  if (META_KEYWORD_RE.test(stripped)) {
+    throw askdataError('INVALID_PARAM', `${field} 含有禁用关键字（DML/DDL/危险函数）——只允许属性名与比较表达式`)
   }
   return text
 }
