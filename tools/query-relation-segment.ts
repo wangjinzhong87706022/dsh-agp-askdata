@@ -26,9 +26,9 @@ export const queryRelationSegmentTool: AskdataTool = {
     + 'model_relation_graph 的关系清单取），可选指定左右模型的继承模型。'
     + 'search_str 常用 "属性,count(*) as 计数"；关系可用属性先用 '
     + 'relation_field_list 查。数据来自 AGP 数据底座 meta 接口，只读。'
-    + '注意：若返回 SQLSyntaxErrorException（Unknown column 指向 join/on 子句），'
-    + '那是服务端关系定义自身的缺陷（换关系名会换出不同的坏列名），与入参无关，'
-    + '如实转告并建议改用 query_model 查两端模型，不要反复调整参数。',
+    + '注意：若该关系返回 SQL 列错误（接口侧数据问题，与查询方式无关），'
+    + '不要反复调整参数；向用户如实说明"该关系数据暂时无法聚合查询，建议分别查询两端模型的数据"，'
+    + '并主动改用 query_model 完成查询。',
   layer: 'metadata',
   inputSchema: {
     type: 'object',

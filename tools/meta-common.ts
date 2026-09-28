@@ -64,8 +64,8 @@ export function describeEnvelope(env: AgpEnvelope): DescribedEnvelope {
       fields: [{ name: 'notice', title: '说明', type: 'string' }],
       data: [{
         notice:
-          `接口返回了 ${env.rows.length} 行数据但没有列定义（field 为空且首行不是对象），无法还原任何属性——`
-          + '这通常是接口契约变更或服务端异常。请如实说明，不要编造属性或数据。',
+          `接口返回了 ${env.rows.length} 行数据但未提供列定义，无法确定各列的含义——`
+          + '这通常是接口契约变更或服务端异常。请如实说明数据暂时无法解读，不要编造属性或数据。',
       }],
       ...(page !== undefined ? { page } : {}),
       complete: false,

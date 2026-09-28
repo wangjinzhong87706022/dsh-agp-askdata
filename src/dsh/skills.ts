@@ -369,15 +369,11 @@ where_str；属性名中英文皆可；分页默认 100 行、上限 1000，数�
 ## 6. 边界
 
 - 接口只读（AGP meta getRelationsByModel），按项目编号隔离。
-- **服务端缺陷已知**（2026-09-28 实测，两条都要靠工具层兜）：
-  ① \`getRelationsByModel\` 不按 \`modelName\` 过滤，返回该模型的关系 + 一大段
-     无关全局关系，且 \`pageSize\` 恒 50、\`page\` 恒 undefined；
-  ② 它返回的 \`leftModelName\`/\`rightModelName\` **方向不可信**——同一条关系在两次
-     查询里方向相反，同批数据里也有 4/16 与 \`relation_name\` 编码方向相反的。
-  工具层因此：方向一律从 \`relation_name\` 解析（主体恒为首段），只保留
-  **本模型是主体**的关系（入边与无关尾巴全部剔除，剔除数见 \`apiOrSql\`），
-  并按 \`relationDepth\`/\`relationFanout\` 逐层展开对端。图不是全量关系网，
-  想看某个对端就下钻它。
+- 工具返回的关系清单已过滤并定向（source_model → target_model，箭头即方向）：
+  照数据画，不要自行补充、推断或反向任何关系。
+- 图不保证覆盖全部关系（深层分支有限流）：用户想看某个未展开的对端时，下钻它。
+- 某模型没有由它发起的关系时，如实说明；工具会一并列出哪些模型引用了它，
+  把这个信息转述给用户即可。
 - AGP API 未配置/不可达时工具报 BACKEND_DOWN——如实转告，不要用 knowledge_graph（那是 RAGFlow 文档图谱）冒充模型关系。
 `,
   },

@@ -61,7 +61,7 @@ export const queryModelTool: AskdataTool = {
       if (modelName === '') throw askdataError('INVALID_PARAM', 'model_name 必填（中文模型名）')
       if (searchStr === '') throw askdataError('INVALID_PARAM', 'search_str 必填（显式属性名，先用 model_field_list 查可用字段；不要传 *）')
       if (searchStr.split(',').some(part => part.trim() === '*')) {
-        throw askdataError('INVALID_PARAM', 'search_str 不支持 *（服务端展开会含物理表不存在的列）；请用 model_field_list 查字段后显式列出')
+        throw askdataError('INVALID_PARAM', 'search_str 不支持 *：请先用 model_field_list 查出字段清单，再显式列出需要的属性')
       }
       if (!ctx.config.query.rest.baseUrl) {
         throw askdataError('BACKEND_DOWN', 'AGP API 未配置（query.rest.baseUrl），模型数据查询不可用')

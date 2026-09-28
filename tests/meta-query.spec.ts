@@ -204,7 +204,7 @@ describe('describeEnvelope 退化形态（field 空 + 行取不出列）', () =>
     expect(res.success).toBe(true)
     expect(res.rowCount).toBe(1)
     expect(res.fields.map((f) => f.name)).toEqual(['notice'])
-    expect(String(res.data[0]!.notice)).toContain('没有列定义')
+    expect(String(res.data[0]!.notice)).toContain('未提供列定义')
     expect(String(res.data[0]!.notice)).toContain('不要编造')
   })
 

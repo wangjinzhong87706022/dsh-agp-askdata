@@ -31,12 +31,9 @@ import { resolveAgpCredentials } from '../src/clients/tsdb-rest.ts'
 const FIELDS: ResultField[] = [
   { name: 'rank', title: '序号', type: 'number' },
   { name: 'level', title: '层级', type: 'number' },
-  { name: 'relation_name', title: '关系内部名', type: 'string' },
   { name: 'relation_description', title: '关系名称', type: 'string' },
-  { name: 'source_model', title: '起点模型', type: 'string' },
-  { name: 'target_model', title: '终点模型', type: 'string' },
-  { name: 'source_class_path', title: '起点内部名', type: 'string' },
-  { name: 'target_class_path', title: '终点内部名', type: 'string' },
+  { name: 'source_model', title: '发起模型', type: 'string' },
+  { name: 'target_model', title: '对端模型', type: 'string' },
 ]
 
 /**
@@ -424,22 +421,22 @@ export async function resolveModelRef(
 function renderHintRow(
   modelName: string,
   relationCount: number,
-  droppedCount: number,
   depthReached: number,
-  fanoutLimited: boolean,
+  fanoutCap: number | null,
 ): Record<string, unknown> {
+  // 提示行的措辞底线：这里的一切都可能被模型原样搬进用户可见的回答，
+  // 只允许「画图规则」与「给用户的交代」，不允许实现叙述（谁过滤了什么、
+  // 哪个配置项限流——那是 apiOrSql/审计面的事）。
   const dataRule =
     `data/links 构造规则（每行一条关系，**关系是边不是节点**）：\n` +
     `① data 里放全部出现过的模型（去重）：data:[{"label":"模型名"}]；\n` +
-    `② links 每行一条边：{"from":起点模型,"to":终点模型,"label":关系名称}，` +
-    `from/to 必须与 data 里的 label 逐字一致（起点=发起方，箭头方向即关系方向）；\n` +
+    `② links 每行一条边：{"from":发起模型,"to":对端模型,"label":关系名称}，` +
+    `from/to 必须与 data 里的 label 逐字一致（发起方在 from，箭头方向即关系方向）；\n` +
     `③ 同一对起终点有多条关系时，各自成一条边（关系名不同，label 不同）。\n` +
     `本次共 ${relationCount} 条关系，已展开到第 ${depthReached} 层。` +
-    (droppedCount > 0
-      ? `\n注意：服务端未按 modelName 过滤，返回里混了 ${droppedCount} 条与本模型无关的全局关系，已在上方数据中剔除——不要把它们画进图里。`
-      : '') +
-    (fanoutLimited
-      ? `\n注意：更深的层受 relationFanout 限流，只画了出边最多的若干个对端——图不是全量，想看某个对端请单独下钻它。`
+    `\n图只基于上方数据绘制，不要自行补充、推断或反向任何关系。` +
+    (fanoutCap !== null
+      ? `\n图面只展开了关联最多的 ${fanoutCap} 个深层分支，并非全部关系；用户想看未展开的分支时，可下钻对应的对端模型。`
       : '')
 
   const drillProtocol =
@@ -460,12 +457,9 @@ function renderHintRow(
   return {
     rank: 0,
     level: 0,
-    relation_name: '',
     relation_description: '【关系图渲染指引】',
     source_model: '',
     target_model: '',
-    source_class_path: '',
-    target_class_path: '',
     hint:
       `请套用以下 dsh-ui 围栏模板输出关系图（结构逐字保留，data/links 里的示例模型按上方真实关系替换；` +
       `配色、箭头、边标签与单击下钻全部内置，不要自己补 option 或样式字段）：\n` +
@@ -497,10 +491,10 @@ export const modelRelationGraphTool: AskdataTool = {
   name: 'model_relation_graph',
   previewLimit: RELATION_PREVIEW_LIMIT,
   description:
-    '查询一个模型的关系链（关系图谱）：返回与指定模型相关的所有模型关系清单（关系名称、左模型、右模型），'
-    + '并按指引以 dsh-ui echart 树形图渲染。输入中文模型名（如 水泵模型、企业职工模型、安科瑞水表模型；'
-    + '也接受 class_path 形态）。数据来自 AGP 数据底座 meta 接口（getRelationsByModel），只读。'
-    + '查模型的字段构成（属性清单）用 model_field_list。',
+    '查询一个模型的关系图谱：返回由该模型发起的模型关系清单（发起模型、对端模型、关系名称），'
+    + '并逐层展开对端模型，按指引以 dsh-ui graph 关系图渲染（节点=模型，边=关系，边上带关系名）。'
+    + '输入中文模型名（如 水泵模型、企业职工模型；也接受内部编码形态）。'
+    + '数据来自 AGP 数据底座 meta 接口，只读。查模型的字段构成（属性清单）用 model_field_list。',
   layer: 'base_business',
   inputSchema: {
     type: 'object',
@@ -547,8 +541,10 @@ export const modelRelationGraphTool: AskdataTool = {
       // class_path → 中文名；随展开逐步累积（每层一次批量 IN 查询补齐）
       const aliases = new Map<string, string>()
       if (resolved.alias !== null) aliases.set(classPath, resolved.alias)
+      // 首层里"引用了所查模型"的关系（对端=所查模型、发起方是别的模型）——
+      // 模型没有发起关系时，这是给用户的有用交代（谁在引用它）
+      const referencedBy: Array<{ src: string; desc: string }> = []
       let fetched = 0
-      let dropped = 0
       let leaves = 0
       let fanoutLimited = false
       let frontier: Array<{ path: string; depth: number }> = [{ path: classPath, depth: 1 }]
@@ -577,14 +573,16 @@ export const modelRelationGraphTool: AskdataTool = {
             throw err
           }
           // 先把本批所有候选段批量解析成"已知模型"集合，才能判定哪些段是真对端
-          // （subLink 的连接键段/外键名段也在方括号里，位置猜不得）
+          // （subLink 的连接键段/外键名段也在方括号里，位置猜不得）。
+          // 发起方段也一并解析：首层"被引用"统计要用它的中文名。
           const candidates = new Set<string>()
           const parsed: Array<{ source: string; peers: string[]; name: string; desc: string }> = []
           for (const row of rows) {
             const p = parseRelationName(row.relation_name)
-            if (p === null) { dropped++; continue }
+            if (p === null) continue
             parsed.push({ ...p, name: String(row.relation_name ?? ''), desc: String(row.relation_description ?? '') })
             for (const c of p.peers) candidates.add(c)
+            candidates.add(p.source)
           }
           const missing = [...candidates].filter((c) => !aliases.has(c))
           if (missing.length > 0) {
@@ -593,11 +591,17 @@ export const modelRelationGraphTool: AskdataTool = {
           }
           for (const p of parsed) {
             if (edges.length >= cap) break
-            // 本模型不是主体 → 入边/无关关系，丢弃
-            if (p.source !== node.path) { dropped++; continue }
             const target = resolvePeer(p.peers, aliases)
-            // 挑不出真对端（候选段都不是登记模型）→ 丢弃，不猜方向
-            if (target === null) { dropped++; continue }
+            // 不是本节点发起的关系：若对端恰是所查模型（仅首层），记为"被引用"，
+            // 供零关系时交代；其余与图无关，跳过。
+            if (p.source !== node.path) {
+              if (node.depth === 1 && target === node.path) {
+                referencedBy.push({ src: p.source, desc: p.desc })
+              }
+              continue
+            }
+            // 挑不出真对端（候选段都不是登记模型）→ 跳过，不猜方向
+            if (target === null) continue
             const key = `${p.source}->${target}:${p.name}`
             if (seenPairs.has(key)) continue
             seenPairs.add(key)
@@ -625,7 +629,7 @@ export const modelRelationGraphTool: AskdataTool = {
         frontier = next
       }
 
-      // 节点名 = 中文名；解析不出中文名的（aliases 里没有）退回 class_path，
+      // 节点名 = 中文名；解析不出中文名的（aliases 里没有）退回内部名，
       // 至少图还能看，且不静默丢边。
       const nodeAliases = aliases
       const rootAlias = nodeAliases.get(classPath) ?? resolved.alias ?? modelName
@@ -634,30 +638,34 @@ export const modelRelationGraphTool: AskdataTool = {
       const data: Record<string, unknown>[] = edges.map((e, i) => ({
         rank: i + 1,
         level: e.level,
-        relation_name: e.name,
         relation_description: e.desc,
         source_model: nodeAliases.get(e.src) ?? e.src,
         target_model: nodeAliases.get(e.dst) ?? e.dst,
-        source_class_path: e.src,
-        target_class_path: e.dst,
       }))
 
       if (data.length === 0) {
+        // 零关系说明要经模型转述给用户，只能写结论与建议，不能带实现叙述
+        // （"剔除/入边/服务端缺陷"这类词模型会原样搬进回答）。
+        const referrers = [...new Set(referencedBy.map((r) => nodeAliases.get(r.src) ?? r.src))]
+        const shown = referrers.slice(0, 5)
+        const refNote = shown.length > 0
+          ? `它在 ${referencedBy.length} 条关系中被引用为对端（发起方：${shown.join('、')}${referrers.length > shown.length ? ' 等' : ''}）。`
+            + `想查看这类关联，可查询对应发起方模型的关系图谱。`
+          : ''
         data.push({
-          rank: 0, level: 0, relation_name: '',
-          relation_description: `模型「${rootAlias}」（${classPath}）没有它发出的模型关系：`
-            + `服务端返回的关系里没有一条以它为主体（已剔除 ${dropped} 条它只是对端的入边与无关关系）。`
-            + `请如实说明，不要编造关系。`,
-          source_model: '', target_model: '', source_class_path: '', target_class_path: '',
+          rank: 0, level: 0,
+          relation_description: `「${rootAlias}」没有由它发起的模型关系。${refNote}请如实说明，不要编造关系。`,
+          source_model: '', target_model: '',
         })
       } else {
-        data.push(renderHintRow(rootAlias, data.length, dropped, depthReached, fanoutLimited))
+        data.push(renderHintRow(rootAlias, data.length, depthReached, fanoutLimited ? relationFanout : null))
       }
 
-      const apiOrSql = `GET ${metaBase}/getRelationsByModel ×${fetched} 次（首模型 ${classPath}，逐层展开）→ `
-        + `本模型发出的关系 ${data.length > 0 ? data.length - 1 : 0} 条，展开到第 ${depthReached} 层，`
-        + `剔除入边/无关关系 ${dropped} 条${leaves > 0 ? `，${leaves} 个对端无出边` : ''}`
-        + `${fanoutLimited ? `深层限流 ${relationFanout} 个分支` : ''}`
+      const apiOrSql = `关系图谱（getRelationsByModel ×${fetched} 次）：`
+        + `由「${rootAlias}」发起的关系 ${edges.length} 条，展开至第 ${depthReached} 层`
+        + (referencedBy.length > 0 ? `；另有 ${referencedBy.length} 条关系引用了它（未画入图）` : '')
+        + (leaves > 0 ? `；${leaves} 个对端模型没有向外的关系` : '')
+        + (fanoutLimited ? `；深层仅展开 ${relationFanout} 个分支` : '')
       const result = ok(modelRelationGraphTool.name, {
         apiOrSql,
         params: args,

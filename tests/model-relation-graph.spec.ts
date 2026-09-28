@@ -233,8 +233,7 @@ describe('model_relation_graph', () => {
     expect(res.data[0]!.source_model).toBe('设备基础模型')
     expect(res.data[0]!.target_model).toBe('能源基础模型')
     expect(res.data[0]!.level).toBe(1)
-    expect(res.apiOrSql).toContain('剔除入边/无关关系 1 条')
-
+    
     const hintText = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
     // 关系是边不是节点：graph preset + links + 边 label
     expect(hintText).toContain('"preset":"graph"')
@@ -259,8 +258,8 @@ describe('model_relation_graph', () => {
     expect(a.total).toBe(2)
     // 设备参数列模型**没有**以自己为主体的边 → 明确说没有，而不是把入边反向画出来
     expect(b.total).toBe(0)
-    expect(String(b.data[0]!.relation_description)).toContain('没有它发出的模型关系')
-    expect(String(b.data[0]!.relation_description)).toContain('入边')
+    expect(String(b.data[0]!.relation_description)).toContain('没有由它发起的模型关系')
+    expect(String(b.data[0]!.relation_description)).toContain('被引用为对端')
   })
 
   it('逐层展开：第二层的边带 level=2，对端会被再次查询', async () => {
@@ -279,7 +278,7 @@ describe('model_relation_graph', () => {
     expect(levels).toContain(2)
     const l2 = res.data.find((r) => r.level === 2)!
     expect(l2.source_model).toBe('能源基础模型')
-    expect(res.apiOrSql).toContain('展开到第 2 层')
+    expect(res.apiOrSql).toContain('展开至第 2 层')
   })
 
   it('对端没有出边时降级为叶子（不因一个叶子让整张图失败）', async () => {
@@ -302,7 +301,7 @@ describe('model_relation_graph', () => {
     )
     expect(res.success).toBe(true)
     expect(res.total).toBe(1)
-    expect(res.apiOrSql).toContain('1 个对端无出边')
+    expect(res.apiOrSql).toContain('1 个对端模型没有向外的关系')
   })
 
   it('首层的"无定义"错误仍照常抛出（那才是真的查不成）', async () => {
@@ -355,8 +354,8 @@ describe('model_relation_graph', () => {
         ctxOf(fetchImpl as unknown as typeof fetch, { relationDepth: 3, relationFanout: 2 }),
       )
       const hintText = String((res.data.at(-1) as unknown as Record<string, unknown>).hint)
-      expect(res.apiOrSql).toContain('深层限流 2 个分支')
-      expect(hintText).toContain('图不是全量')
+      expect(res.apiOrSql).toContain('深层仅展开 2 个分支')
+      expect(hintText).toContain('并非全部关系')
       const l3 = res.data.filter((r) => r.level === 3)
       expect(l3.length).toBeLessThanOrEqual(2)
     } finally {
@@ -402,7 +401,7 @@ describe('model_relation_graph', () => {
     expect(getCalls[0]).toBe('wt_1_shebeicanshuliemoxing')
     // 这条关系的主体是设备基础模型，本模型只是对端 → 读法 A 丢弃
     expect(res.total).toBe(0)
-    expect(String(res.data[0]!.relation_description)).toContain('没有它发出的模型关系')
+    expect(String(res.data[0]!.relation_description)).toContain('没有由它发起的模型关系')
   })
 
   it('中文名未命中但形态合法：回落按 class_path 查（覆盖单段无斜杠的真实 class_path）', async () => {
@@ -430,15 +429,14 @@ describe('model_relation_graph', () => {
     const res = await modelRelationGraphTool.run({ model_name: '设备基础模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
     expect(res.total).toBe(1)
     expect(res.data[0]!.relation_description).toBe('正常关系')
-    expect(res.apiOrSql).toContain('剔除入边/无关关系 1 条')
-  })
+      })
 
-  it('空关系：明确"没有它发出的模型关系"，不生成渲染指引', async () => {
+  it('空关系：明确"没有由它发起的模型关系"，不生成渲染指引', async () => {
     const { fetchImpl } = makeFetch({ wt_elm_equipment: [] })
     const res = await modelRelationGraphTool.run({ model_name: '设备基础模型' }, ctxOf(fetchImpl as unknown as typeof fetch))
     expect(res.success).toBe(true)
     expect(res.rowCount).toBe(1)
-    expect(String(res.data[0]!.relation_description)).toContain('没有它发出的模型关系')
+    expect(String(res.data[0]!.relation_description)).toContain('没有由它发起的模型关系')
   })
 
   it('中文名未命中且不是合法 class_path 形态：INVALID_PARAM，不触网拼 SQL', async () => {
