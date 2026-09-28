@@ -86,6 +86,18 @@ export interface MetaQueryLimits {
    * 超出即截断并置 `complete=false`。建模属性理论上远小于此。
    */
   fieldCap: number
+  /**
+   * 关系图谱向下展开的层数（含首层，1 = 只画本模型发出的关系）。
+   * 每多一层都要对每个对端模型再发一次 getRelationsByModel，层数与节点数
+   * 一起决定响应时延与 token 消耗，故走配置而非硬编码。
+   */
+  relationDepth: number
+  /**
+   * 展开到最深层时，最多对几个对端模型继续展开（按出边数取前 N）。
+   * 第 2 层全展（对端通常个位数），第 3 层及以后只展度数最高的 N 个，
+   * 否则一个枢纽模型就能把图撑成上百个节点。
+   */
+  relationFanout: number
 }
 
 /** 系统护栏与阈值。 */
@@ -317,7 +329,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     tsdbChannel: 'sql',
     rest: { baseUrl: '', wtAppid: '', wtToken: '', wtOpenid: '', fallbackToSql: true, maxPageSize: 1000 },
     // meta 面阈值：关系图谱安全上限 / 分组渲染阈值 / 默认单页行数。
-    meta: { relationCap: 300, defaultPageSize: 100, fieldCap: 300 },
+    meta: { relationCap: 300, defaultPageSize: 100, fieldCap: 300, relationDepth: 3, relationFanout: 3 },
     useAggregateTable: true,
     aggregateTable: 'WT_CUBE',
     cubeTypeMap: DEFAULT_CUBE_TYPE_MAP,
@@ -442,6 +454,8 @@ export function resolveConfig(input: AskdataConfigInput): AskdataConfig {
   assertPositiveInt(query.meta.relationCap, 'query.meta.relationCap')
   assertPositiveInt(query.meta.defaultPageSize, 'query.meta.defaultPageSize')
   assertPositiveInt(query.meta.fieldCap, 'query.meta.fieldCap')
+  assertPositiveInt(query.meta.relationDepth, 'query.meta.relationDepth')
+  assertPositiveInt(query.meta.relationFanout, 'query.meta.relationFanout')
   assertPositiveInt(system.defaultPreviewLimit, 'system.defaultPreviewLimit')
 
   const knowledge = resolveKnowledgeConfig(input.knowledge)

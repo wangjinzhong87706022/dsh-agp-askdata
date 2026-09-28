@@ -92,6 +92,10 @@ export const Config = z.object({
         .description('meta 查询族（query_model / query_model_segment / query_relation_segment）未传 page_size 时的默认单页行数'),
       fieldCap: z.number().default(300).min(1)
         .description('字段构成清单（model_field_list / relation_field_list）的安全截断上限：超出即截断并置 complete=false'),
+      relationDepth: z.number().default(3).min(1)
+        .description('关系图谱向下展开的层数（含首层）：1 = 只画本模型发出的关系。每多一层，对每个对端模型多发一次 getRelationsByModel'),
+      relationFanout: z.number().default(3).min(1)
+        .description('展开到最深层时最多继续展开几个对端模型（按出边数取前 N）：第 2 层全展，更深层限流，防枢纽模型把图撑到上百节点'),
     }).collapse().description('meta 元数据面阈值（AGP 数据底座 meta 接口工具族）'),
     useAggregateTable: z.boolean().default(true)
       .description('是否使用 WT_CUBE 预聚合路由：开启后 aggregate 对 1H/1D/1M/1Y 粒度 tag 自动查聚合表（快）；关闭 = 强制只用 WT_DATA 全聚合（非光伏行业/口径存疑时）'),

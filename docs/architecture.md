@@ -938,8 +938,7 @@ meta 数据查询族自此断档。
 
 | 场景 | 工具 | 设计 |
 |---|---|---|
-| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | 模型可见预览上限远大于安全截断上限（`previewLimit` 常量 1000 vs `query.meta.relationCap` 300，两者取 min 生效，超限 complete=false）；模型面全量返回。**model_relation_graph 需按端点过滤**：服务端 `getRelationsByModel` 不按 `modelName` 过滤（2026-09-28 实测：设备基础模型 12/50、建筑基础模型 2/50 为真正直接关系，两模型返回集交集 49/49；`pageSize` 传 500/2000 均只回 50 行，`page` 恒 undefined），工具层用 `direct` 判定（端点名 == 模型中文名）剔掉尾巴，剔除条数记进 `apiOrSql` 与渲染指引；**class_path 入参先反查 `class_alias` 拿中文名**（`queryByGenericSql` 按 `class_path` 反查），反查不到则原样透出并要求模型只画以本模型为端点的关系。过滤后全部是直接关系，故无「间接链路」分组指引，`query.meta.groupedHintThreshold` 随之删除；`total` 报过滤后条数 |
-| 无界业务数据 | query_model | 保留分页；`page.itemTotal` 顶层透出为 `total`，单页即全量时 `complete=true`；description 教"total 超一页先收窄 where_str 或改用 query_model_segment，不要逐页翻" |
+| 有界元数据清单 | model_relation_graph / model_field_list / relation_field_list | 模型可见预览上限远大于安全截断上限（`previewLimit` 常量 1000 vs `query.meta.relationCap` 300，两者取 min 生效，超限 complete=false）；模型面全量返回。**model_relation_graph 的方向与过滤**（2026-09-28 实测，服务端两条缺陷叠加）：① `getRelationsByModel` 不按 `modelName` 过滤——设备基础模型与建筑基础模型的返回集交集 49/49，且 `pageSize` 恒 50、`page` 恒 undefined；② 它返回的 `leftModelName`/`rightModelName` **方向随查询模型漂移**——同一条 `subLink_[wt_elm_equipment]_..` 在查设备基础模型时回 `[设备基础模型 → 设备参数列模型]`、查设备参数列模型时回反向；同批数据里也有 4/16 与 `relation_name` 编码方向相反的。工具层因此**只认 `relation_name`**（主体恒为首段，`subLink_[A]_[key]_[B]_[fk]` 的连接键/外键名段不是模型、靠批量 `meta_class_info` 查询验证而非按位置猜），**只保留本模型是主体的关系**（入边与无关尾巴全部剔除，剔除数记进 `apiOrSql`），按 `relationDepth`（默认 3，含首层）/ `relationFanout`（默认 3，深层按度数取前 N）逐层展开对端。**关系是边不是节点**：渲染模板为 `preset:"graph"`，`links[].label` 承载关系名（genui graph preset 的边标签扩展），箭头方向即关系方向 |
 | 聚合统计 | query_model_segment / query_relation_segment | 输出天然小，同样透出 total/complete |
 
 机制：`ToolResult.total/complete`（模型可见的完整性契约，adapter 顶层透出；
