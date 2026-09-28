@@ -206,17 +206,18 @@ function renderHintRow(
       (directReliable ? '' : `注意：本次以 class_path 入参，接口返回的是中文端点名，无法判定哪些关系是直接关系，direct 列一律为"无法判定"——不要按直接/间接分组。`)
   const drillProtocol =
     `双击图上任意节点会向你发 [genui-action] "下钻模型：X"，用户打字"下钻 X"同义。下钻响应协议：\n` +
-    `[1] 幂等检查——若会话中最后一棵树里 X 节点已有子节点（已展开过），只回复一句"「X」已在图中展开"，` +
+    `[1] 幂等检查——若本次会话里 X 已经查过（上一条回答展开过 X），只回复一句"「X」上一条已展开"，` +
     `不调用工具、不输出围栏。\n` +
-    `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏（把新增子树并入首图，绝对不要重绘整棵树；` +
-    `children 必须写成真实数据元素、至少 1 个，禁止省略号或注释）：\n` +
+    `[2] 否则调用本工具查 X 的关系，只输出以下 patch 围栏——**就地展开为本次回答中的一棵独立子树图**，` +
+    `标题带完整路径；不要重绘首图，也不要把子树并回首图（会让首图膨胀、用户要往上翻找）：\n` +
     '```dsh-ui\n' +
-    `{"type":"echart","title":"已展开「X」（并入上图）","drill":{"key":"${modelName}"},` +
+    `{"type":"echart","preset":"tree","title":"${modelName} › X","height":400,` +
     `"drillPatch":{"key":"${modelName}","target":"X","children":[` +
     `{"name":"关系A","children":[{"name":"对端模型1"}]},` +
     `{"name":"经XX链路","children":[{"name":"对端模型2"}]}]}}\n` +
     '```\n' +
-    `[3] key 固定用首图 key（"${modelName}"）；文字概述 1-2 句即可。\n`
+    `[3] children 只含本次新增的子树（真实数据元素、至少 1 个，禁止省略号或注释）；` +
+    `key 固定用首图 key（"${modelName}"）；文字概述 1-2 句，并提示可继续双击下钻。\n`
   return {
     rank: 0,
     relation_name: '',
