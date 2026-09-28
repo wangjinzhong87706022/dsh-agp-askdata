@@ -322,7 +322,7 @@ data 里的 \`label\` 逐字一致，\`from\` = 发起方，箭头方向即关�
 
 \`\`\`
 [1] model_field_list(model_name: "设备参数列模型") → 属性行（field_name/field_description/field_type）
-[2] 以表格呈现：属性名称 / 描述 / 类型码；文字概述字段构成的业务含义
+[2] 以 **Markdown 表格**呈现（| 属性名称 | 描述 | 类型码 |）；文字概述字段构成的业务含义
 \`\`\`
 
 要点：结果直接来自 meta 接口，不要编造字段；返回 0 行时说明该模型全部属性
@@ -335,7 +335,7 @@ data 里的 \`label\` 逐字一致，\`from\` = 发起方，箭头方向即关�
 
 \`\`\`
 [1] query_model(model_name: "设备参数列模型", search_str: "id,code,name,canshuzhi,shuoming")
-    → 模型业务数据行（表格呈现；search_str 必须显式列名，传 * 会报 Unknown column）
+    → 模型业务数据行（用 **Markdown 表格**呈现；search_str 必须显式列名，传 * 会报 Unknown column）
 [2] query_model_segment(model_name, search_str: "code,count(*) as 计数",
     segment: [{where_str:"tree_level > 0", title:"有层级"}, …]) → 分段聚合表
 [3] relation_field_list(relation_name: "设备参数列表") → 关系可用字段（含所属模型）
@@ -369,6 +369,11 @@ where_str；属性名中英文皆可；分页默认 100 行、上限 1000，数�
 
 ## 6. 边界
 
+- **dsh-ui 围栏只用于两处**：①关系图谱（模板由工具返回自带，照抄换数据即可）；
+  ②知识取证的 citations 围栏。其余一切——字段清单、数据行、聚合统计——
+  用 **Markdown 表格**回答，不要自创 dsh-ui 围栏：交互组件留给需要
+  下钻/溯源的场景，静态展示用 Markdown 零抄写风险（自创围栏结构写错时
+  用户只会看到一坨原始 JSON）。
 - 接口只读（AGP meta getRelationsByModel），按项目编号隔离。
 - 工具返回的关系清单已过滤并定向（source_model → target_model，箭头即方向）：
   照数据画，不要自行补充、推断或反向任何关系。
