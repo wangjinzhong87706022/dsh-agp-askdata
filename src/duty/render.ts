@@ -79,8 +79,8 @@ export function renderDutyReportHtml(
         : '<span class="tag tag-ok">未超</span>'
     return `
       <tr><td>${escapeHtml(t.stationName)}</td><td>${escapeHtml(t.label)}</td>
-      <td>${escapeHtml(t.level)}</td><td class="num">${fmt(t.thresholdValue, 2)}</td>
-      <td class="num">${t.observedValue === null ? '—' : fmt(t.observedValue, 2)}</td>
+      <td>${escapeHtml(t.level)}</td><td class="num">${fmt(t.thresholdValue, t.decimals ?? 2)}</td>
+      <td class="num">${t.observedValue === null ? '—' : fmt(t.observedValue, t.decimals ?? 2)}</td>
       <td>${verdict}</td></tr>`
   }).join('\n')
 

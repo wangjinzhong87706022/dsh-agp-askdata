@@ -154,7 +154,7 @@ describe('generate_duty_report', () => {
     expect(row.ruleHitCount).toBe(1) // 水位 787.62 超警戒（787.5），雨量 32.5 未超
     expect(String(row.packHash)).toMatch(/^[0-9a-f]{16}$/)
     expect(String(row.validation)).toContain('通过')
-    expect(String(row.filename)).toMatch(/^duty-report-桃曲坡水库-20240814-0800-白班\.html$/)
+    expect(String(row.filename)).toMatch(/^duty-report-桃曲坡水库-20240814-0800-白班-[0-9a-f]{8}\.html$/)
 
     const html = await readFile(String(row.path), 'utf8')
     expect(html).toContain('id="sec-telemetry"')
@@ -301,6 +301,118 @@ describe('generate_duty_report', () => {
     const body = JSON.parse(String((r.fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0]![1].body))
     expect(body.tagNames).toEqual(['TQPRN001_1O_1002'])
     expect(res.data[0]!.stationCount).toBe(1)
+  })
+
+  it('null/空串实时值按缺测（Number(null)=0 陷阱：绝不记成 0.00 观测）', async () => {
+    const agpFetch = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: [
+        { tagName: 'TQPSW001_1O_1001', value: null, timestamp: '2024-08-14 08:00:00' },
+        { tagName: 'TQPRN001_1O_1002', value: '', timestamp: '2024-08-14 08:00:00' },
+      ],
+    })) as unknown as typeof fetch
+    const r = await tracked(rig({ agpFetch }))
+    withOutput(r)
+    const res = await dutyReportTool.run({ ...SHIFT }, r.ctx)
+    expect(res.success).toBe(true)
+    const row = res.data[0]!
+    expect(row.telemetryCount).toBe(0)
+    expect(row.ruleHitCount).toBe(0)
+    // 2 条逐测点缺测 + 1 条知识面未装配
+    expect(row.abstentionCount).toBe(3)
+    const html = await readFile(String(row.path), 'utf8')
+    expect(html).toContain('本班次无可用观测')
+    expect(html).not.toContain('<td class="num">0.00</td>')
+  })
+
+  it('观测时间超出值班时段容差：记 DATA_STALE 缺口、按缺测研判（补报防护）', async () => {
+    // AGP API 永远回"当前最新值"——补报 2024 班次时观测时间是现在时 → 超窗剔除
+    const staleFetch = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: [
+        { tagName: 'TQPSW001_1O_1001', value: 787.62, timestamp: '2026-09-29 21:00:00' },
+        { tagName: 'TQPRN001_1O_1002', value: 32.5, timestamp: '2026-09-29 21:00:00' },
+      ],
+    })) as unknown as typeof fetch
+    const r2 = await tracked(rig({ agpFetch: staleFetch }))
+    withOutput(r2)
+    const res = await dutyReportTool.run({ ...SHIFT }, r2.ctx)
+    expect(res.success).toBe(true)
+    const row = res.data[0]!
+    expect(row.telemetryCount).toBe(0)
+    expect(row.ruleHitCount).toBe(0)
+    // 2 条 DATA_STALE + 1 条知识面未装配（无重复 DATA_MISSING）
+    expect(row.abstentionCount).toBe(3)
+    const html = await readFile(String(row.path), 'utf8')
+    expect(html).toContain('DATA_STALE')
+    expect(html).toContain('按缺测处理')
+    expect(html).toContain('容差 24 小时')
+    expect(html).not.toContain('DATA_MISSING')
+
+    // 容差内出窗（班次结束后 3.5h 的滞后回行，容差 4h）保留入报
+    const withinFetch = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: [{ tagName: 'TQPSW001_1O_1001', value: 787.62, timestamp: '2024-08-14 23:30:00' }],
+    })) as unknown as typeof fetch
+    const r4 = await tracked(rig({
+      agpFetch: withinFetch,
+      configOverrides: {
+        duty: {
+          project: '桃曲坡水库',
+          staleToleranceMs: 4 * 60 * 60 * 1000,
+          stations: STATION_ARGS.duty.stations.filter((s) => s.id === 'TQP-DAM-SW'),
+          reporting: STATION_ARGS.duty.reporting,
+        },
+      },
+    }))
+    withOutput(r4)
+    const res4 = await dutyReportTool.run({ ...SHIFT }, r4.ctx)
+    expect(res4.success).toBe(true)
+    expect(res4.data[0]!.telemetryCount).toBe(1)
+    expect(res4.data[0]!.ruleHitCount).toBe(1)
+    expect(res4.data[0]!.abstentionCount).toBe(1) // 仅知识面未装配
+  })
+
+  it('共享 tagName 的多指标：按站/指标各记一条 DATA_STALE（归属可追溯）', async () => {
+    const sharedFetch = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: [{ tagName: 'TQPSHARED_1O_1', value: 787.62, timestamp: '2026-09-29 21:00:00' }],
+    })) as unknown as typeof fetch
+    const r = await tracked(rig({
+      agpFetch: sharedFetch,
+      configOverrides: {
+        duty: {
+          project: '桃曲坡水库',
+          stations: [
+            { id: 'TQP-A', name: '甲站', metrics: [{ metric: 'water_level', label: '水位', unit: 'm', tagName: 'TQPSHARED_1O_1', decimals: 2 }] },
+            { id: 'TQP-B', name: '乙站', metrics: [{ metric: 'water_level', label: '水位', unit: 'm', tagName: 'TQPSHARED_1O_1', decimals: 2 }] },
+          ],
+          reporting: [],
+        },
+      },
+    }))
+    withOutput(r)
+    const res = await dutyReportTool.run({ ...SHIFT }, r.ctx)
+    expect(res.success).toBe(true)
+    // 2 条 DATA_STALE（甲/乙各一条）+ 1 条知识面未装配
+    expect(res.data[0]!.abstentionCount).toBe(3)
+    const html = await readFile(String(res.data[0]!.path), 'utf8')
+    const embedded = /<script type="application\/json" id="duty-fact-pack">([\s\S]*?)<\/script>/.exec(html)![1]!
+      .replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'").replaceAll('&amp;', '&')
+    const pack = JSON.parse(embedded) as { abstentions: Array<{ code: string; stationId: string | null; metric: string | null }> }
+    const staleRows = pack.abstentions.filter((a) => a.code === 'DATA_STALE')
+    expect(staleRows).toHaveLength(2)
+    expect(new Set(staleRows.map((a) => a.stationId))).toEqual(new Set(['TQP-A', 'TQP-B']))
+  })
+
+  it('notes 含操作令措辞：REPORT_INVALID 且错误信息点名 notes 来源', async () => {
+    const r = await tracked(rig())
+    withOutput(r)
+    const res = await dutyReportTool.run({ ...SHIFT, notes: '夜间若超汛限请做好开闸准备' }, r.ctx)
+    expect(res.success).toBe(false)
+    expect(res.errorCode).toBe('REPORT_INVALID')
+    expect(res.errorMessage).toContain('notes')
   })
 })
 

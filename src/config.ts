@@ -203,6 +203,12 @@ export interface DutyConfig {
   project: string
   /** 报告产物目录；空 = $DSH_HOME/outputs，再退 ./outputs。 */
   outputDir: string
+  /**
+   * 观测时间容差（毫秒）：实时值观测时间落在值班时段外但未超出该容差仍入报
+   * （遥测滞后/交接班延迟是常态）；超出 → 该测点记 DATA_STALE 缺口，不入研判
+   * （补报历史班次时 AGP API 只能给当前最新值，防"旧时段标题 + 新数据"假报告）。
+   */
+  staleToleranceMs: number
   stations: DutyStation[]
   reporting: DutyReporting[]
 }
@@ -404,6 +410,7 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
   duty: {
     project: '',
     outputDir: '',
+    staleToleranceMs: 86_400_000,
     stations: [] as DutyStation[],
     reporting: [] as DutyReporting[],
   },
@@ -656,9 +663,13 @@ export function resolveDutyConfig(input?: Partial<DutyConfig>): DutyConfig {
   if (merged.project.length > 100) {
     throw new Error('配置错误：duty.project ≤100 字符')
   }
+  if (!Number.isFinite(merged.staleToleranceMs) || merged.staleToleranceMs < 0) {
+    throw new Error('配置错误：duty.staleToleranceMs 必须是非负数值（毫秒）')
+  }
   return {
     project: merged.project,
     outputDir: merged.outputDir,
+    staleToleranceMs: merged.staleToleranceMs,
     stations: merged.stations.map((s) => ({
       id: s.id,
       name: s.name,

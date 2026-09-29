@@ -1,7 +1,8 @@
 /**
  * 值班报告面 E2E（工具级，直驱 createAskdataService，不依赖 DSH web / LLM）。
  *
- * 前置：`node scripts/mock-agp-api.mjs 8410` 已启动（mock AGP API 网关）。
+ * 前置：`node scripts/mock-agp-api.mjs` 已启动（mock AGP API 网关，默认端口 18410
+ * ——避开 Windows 保留区段）。
  * 可选环境变量：RAGFLOW_API_KEY + duty.datasetIds 走真实 RAGFlow（否则规程引用
  * 按缺口渲染——不影响本 E2E 的结构断言）。
  *
@@ -21,7 +22,7 @@ import { join } from 'node:path'
 import { createAskdataService } from '../src/index.ts'
 import { renderDutyReportHtml, validateDutyReportHtml } from '../src/duty/render.ts'
 
-const MOCK_BASE = process.env.MOCK_AGP_BASE ?? 'http://127.0.0.1:8410/iot-etl/iot'
+const MOCK_BASE = process.env.MOCK_AGP_BASE ?? 'http://127.0.0.1:18410/iot-etl/iot'
 const OUTPUT_DIR = await mkdtemp(join(tmpdir(), 'duty-e2e-'))
 
 const service = createAskdataService({
@@ -92,6 +93,23 @@ check('返回 16 位 pack_hash', /^[0-9a-f]{16}$/.test(String(row.packHash)))
 check('3 站 3 观测全量入报', Number(row.telemetryCount) === 3 && Number(row.stationCount) === 3)
 check('超警戒命中 1 条（橙色）', Number(row.ruleHitCount) === 1)
 check('出闸校验通过', String(row.validation).includes('通过'))
+
+// ── 2b. 补报防护：历史班次 + mock 永远回 2024 最新值 → 观测时间超窗全记 DATA_STALE ──
+const backfill = await reportTool.run({
+  shift_start: '2020-07-01T08:00',
+  shift_end: '2020-07-01T20:00',
+  shift_name: '白班',
+}, service.createContext())
+check('补报 2020 班次成功产出（不抛错、按全缺口渲染）', backfill.success,
+  backfill.success ? '' : `${backfill.errorCode}: ${backfill.errorMessage.slice(0, 160)}`)
+if (backfill.success) {
+  const brow = backfill.data[0]!
+  console.log(`   补报产物: ${String(brow.path)}  telemetry=${String(brow.telemetryCount)} abstentions=${String(brow.abstentionCount)}`)
+  check('补报全部测点超窗剔除（telemetry=0，无 0.00/假值）', Number(brow.telemetryCount) === 0 && Number(brow.ruleHitCount) === 0)
+  const bhtml = await readFile(String(brow.path), 'utf8')
+  check('补报缺口段记 DATA_STALE 且无重复 DATA_MISSING', bhtml.includes('DATA_STALE') && !bhtml.includes('DATA_MISSING'))
+  check('容差文案按小时（24 小时）', bhtml.includes('容差 24 小时'))
+}
 
 // ── 3. HTML 单文件离线可开 ──
 const html = await readFile(String(row.path), 'utf8')

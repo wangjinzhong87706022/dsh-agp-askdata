@@ -44,13 +44,17 @@ function formatValue(value: number, decimals: number): string {
 /**
  * 一次值班研判的全部输入：台账 + AGP API 实时值行 + 拉取缺口。
  * `values` 以 tagName 为键（tagName 是 AGP 数据面唯一锚点）。
+ * `staleTagNames`：观测时间超出值班时段容差、已由工具层记 DATA_STALE 缺口的
+ * 测点——研判按缺测处理，但不再重复记 DATA_MISSING（缺口行只有一条）。
  */
 export interface EvaluateInput {
   stations: readonly DutyStation[]
   /** tagName → { value, time }（仅成功拉到的测点）。 */
   values: Map<string, { value: number; time: string | null }>
-  /** 拉取缺口（AGP API 失败聚合；逐测点缺口在 buildTelemetry 里产生）。 */
+  /** 拉取缺口（AGP API 失败聚合；逐测点缺测在 buildTelemetry 里产生）。 */
   fetchErrors: DutyAbstention[]
+  /** 观测时间超窗测点（tagName 集合）；这些测点不产生 DATA_MISSING 重复行。 */
+  staleTagNames?: ReadonlySet<string>
 }
 
 /** 研判输出：三层对照 + 命中 + 缺口。 */
@@ -79,13 +83,16 @@ export function evaluateDutyRules(input: EvaluateInput): EvaluateOutput {
     for (const metric of station.metrics) {
       const observed = input.values.get(metric.tagName)
       if (observed === undefined) {
-        abstentions.push({
-          stationId: station.id,
-          metric: metric.metric,
-          tagName: metric.tagName,
-          code: 'DATA_MISSING',
-          reason: `测点 ${metric.tagName} 本班次未取到实时值（AGP API 无返回），缺测不研判、不邻站填空`,
-        })
+        // stale 测点的 DATA_STALE 缺口行已由工具层记过，这里不再重复记 DATA_MISSING。
+        if (!input.staleTagNames?.has(metric.tagName)) {
+          abstentions.push({
+            stationId: station.id,
+            metric: metric.metric,
+            tagName: metric.tagName,
+            code: 'DATA_MISSING',
+            reason: `测点 ${metric.tagName} 本班次未取到实时值（AGP API 无返回或值不可解析），缺测不研判、不邻站填空`,
+          })
+        }
         for (const threshold of metric.thresholds ?? []) {
           thresholds.push({
             stationId: station.id,
@@ -96,6 +103,7 @@ export function evaluateDutyRules(input: EvaluateInput): EvaluateOutput {
             level: threshold.level,
             thresholdValue: threshold.value,
             op: threshold.op ?? '>=',
+            decimals: metric.decimals ?? 2,
             observedValue: null,
             exceeded: null,
           })
@@ -129,6 +137,7 @@ export function evaluateDutyRules(input: EvaluateInput): EvaluateOutput {
           level: threshold.level,
           thresholdValue: threshold.value,
           op: threshold.op ?? '>=',
+          decimals,
           observedValue: observed.value,
           exceeded,
         })

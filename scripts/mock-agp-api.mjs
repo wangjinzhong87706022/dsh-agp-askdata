@@ -8,12 +8,13 @@
  * 鉴权三头缺失时返回 401（可测凭据回退）。数据为桃曲坡演示水情：
  * 坝上水位 787.62m（超警戒 787.5 → 橙色）、时段降雨 32.5mm（未超）、入库流量 128.4 m³/s。
  *
- * 用法：node scripts/mock-agp-api.mjs [port=8410] [waterLevel]
+ * 用法：node scripts/mock-agp-api.mjs [port=18410] [waterLevel]
  */
 
 import { createServer } from 'node:http'
 
-const port = Number(process.argv[2] ?? 8410)
+// 默认端口避开 Windows 保留区段（8410 在部分机器 EACCES 起不来）。
+const port = Number(process.argv[2] ?? 18410)
 const waterLevel = Number(process.argv[3] ?? 787.62)
 const observedAt = '2024-08-14 08:00:00'
 

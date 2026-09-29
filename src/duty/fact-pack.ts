@@ -105,10 +105,12 @@ export function buildFactPack(input: BuildFactPackInput): DutyFactPack {
   }
 }
 
-/** 数据缺口分类码（abstentions 专用；规范错误码以外的两个补充码）。 */
+/** 数据缺口分类码（abstentions 专用；规范错误码以外的三个补充码）。 */
 export const DUTY_GAP_CODES = {
   /** 测点本轮无实时值。 */
   DATA_MISSING: 'DATA_MISSING',
+  /** 实时值观测时间在值班时段外且超出容差（补报/滞后防护，按缺测处理）。 */
+  DATA_STALE: 'DATA_STALE',
   /** 知识面未装配或检索为空（规程引用缺口）。 */
   KNOWLEDGE_UNAVAILABLE: 'KNOWLEDGE_UNAVAILABLE',
 } as const

@@ -74,7 +74,7 @@ export function describeEnvelope(env: AgpEnvelope): DescribedEnvelope {
   const data = env.rows.map((row) => {
     const obj: Record<string, unknown> = {}
     for (const f of fields) {
-      obj[f.name] = f.type === 'number' ? toNumber(row[f.name] as string | null | undefined) : (row[f.name] ?? '')
+      obj[f.name] = f.type === 'number' ? toNumber(row[f.name] as string | number | null | undefined) : (row[f.name] ?? '')
     }
     return obj
   })

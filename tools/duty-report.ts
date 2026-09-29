@@ -19,13 +19,13 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { AskdataTool, ToolContext } from './types.ts'
-import { applyAudit } from './types.ts'
+import { applyAudit, toNumber } from './types.ts'
 import { fail, ok, type ResultField } from '../src/result.ts'
 import { askdataError, AskdataError } from '../src/errors.ts'
 import type { ErrorCode } from '../src/errors.ts'
 import type { DutyAbstention, DutyCitation, DutyFactPack } from '../src/duty/types.ts'
 import { DUTY_GAP_CODES, buildFactPack } from '../src/duty/fact-pack.ts'
-import { renderDutyReportHtml, validateDutyReportHtml } from '../src/duty/render.ts'
+import { OPERATION_COMMAND_RE, renderDutyReportHtml, validateDutyReportHtml } from '../src/duty/render.ts'
 import { fetchAgpRealtime } from '../src/clients/tsdb-rest.ts'
 import { validateTimeRange } from '../src/sql/validate.ts'
 import type { DutyStation } from '../src/config.ts'
@@ -157,8 +157,10 @@ async function fetchTelemetry(
   const values = new Map<string, { value: number; time: string | null }>()
   for (const row of out.rows) {
     if (row.tagName === null || row.tagName === undefined) continue
-    const value = Number(row.latestValue)
-    if (!Number.isFinite(value)) continue
+    // toNumber：null/非数值一律 → null 按缺测跳过。Number(null)=0 陷阱会把网关的
+    // null 值静默记成 0.00 观测（缺测不编造红线）。
+    const value = toNumber(row.latestValue)
+    if (value === null) continue
     values.set(row.tagName, { value, time: row.latestTime ?? null })
   }
   return values
@@ -210,19 +212,25 @@ export const dutyReportTool: AskdataTool = {
     let pack: DutyFactPack | null = null
     try {
       if (ctx.signal?.aborted) throw askdataError('BACKEND_DOWN', '工具调用已被取消')
-      pack = await buildReport(args, ctx)
+      const built = await buildReport(args, ctx)
+      pack = built.pack
       const html = renderDutyReportHtml(pack, {
         title: typeof args.title === 'string' ? args.title : undefined,
         notes: typeof args.notes === 'string' ? args.notes : undefined,
       })
       const validation = validateDutyReportHtml(html, pack)
       if (!validation.valid) {
-        throw askdataError('REPORT_INVALID', `报告出闸校验未通过: ${validation.errors.join('；')}`)
+        // notes 里带操作令措辞是最常见的可自愈原因——点名来源，避免模型原样重试。
+        const notesHint = typeof args.notes === 'string' && OPERATION_COMMAND_RE.test(args.notes)
+          ? '（notes 交接事项含操作令措辞：改写 notes 后重试，报告正文禁止出现开闸/关闸/启泵等命令式表述）'
+          : ''
+        throw askdataError('REPORT_INVALID', `报告出闸校验未通过: ${validation.errors.join('；')}${notesHint}`)
       }
 
       const dir = resolveOutputDir(ctx)
       await mkdir(dir, { recursive: true })
-      const filename = `duty-report-${sanitizeFilePart(pack.project)}-${fileStamp(pack.shift.start)}-${sanitizeFilePart(pack.shift.name)}.html`
+      // queryId 段防同班次重生成覆盖历史报告（pack_hash 每次不同，旧报告仍可追溯）。
+      const filename = `duty-report-${sanitizeFilePart(pack.project)}-${fileStamp(pack.shift.start)}-${sanitizeFilePart(pack.shift.name)}-${pack.queryId.slice(0, 8)}.html`
       const path = join(dir, filename)
       await writeFile(path, html, 'utf8')
 
@@ -236,7 +244,7 @@ export const dutyReportTool: AskdataTool = {
       if (limitations.length === 0) limitations.push('无')
 
       const result = ok(dutyReportTool.name, {
-        apiOrSql: `AGP API realtime ×${collectTagNames(resolveStations(ctx, stationIdsOf(args))).length} tags + 规程引用 ×${pack.citations.length} → ${filename}`,
+        apiOrSql: `AGP API realtime ×${built.tagNames.length} tags + 规程引用 ×${pack.citations.length} → ${filename}`,
         params: args,
         fields: FIELDS,
         data: [{
@@ -280,8 +288,61 @@ function stationIdsOf(args: Record<string, unknown>): string[] {
   return raw.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
 }
 
-/** 报告构建主链（台账 → AGP API → 研判 → 引用 → 事实包）。 */
-async function buildReport(args: Record<string, unknown>, ctx: ToolContext): Promise<DutyFactPack> {
+/**
+ * 观测时间窗口校验（补报防护）：AGP API 只给"当前最新值"，补报历史班次时它是
+ * 现在时——直接入报会产出"旧时段标题 + 新数据"的假报告。观测时间落在时段外且
+ * 超出 staleToleranceMs 容差的测点从 values 剔除并记 DATA_STALE 缺口；容差内
+ * 的出窗（遥测滞后/交接班延迟）保留。网关未回时间的行无从判定，保留。
+ * 返回被剔除的 tagName 集合（研判层据此抑制重复的 DATA_MISSING 行）。
+ */
+function filterStaleObservations(
+  values: Map<string, { value: number; time: string | null }>,
+  window: { start: string; end: string },
+  toleranceMs: number,
+  stations: readonly DutyStation[],
+  fetchErrors: DutyAbstention[],
+): Set<string> {
+  const stale = new Set<string>()
+  const startMs = Date.parse(window.start)
+  const endMs = Date.parse(window.end)
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return stale // 时段已在入口校验，防御
+  const tolerance = Number.isFinite(toleranceMs) ? Math.max(0, toleranceMs) : 0
+  for (const [tagName, entry] of values) {
+    if (entry.time === null) continue
+    const at = Date.parse(entry.time)
+    if (Number.isNaN(at)) continue
+    if (at >= startMs - tolerance && at <= endMs + tolerance) continue
+    values.delete(tagName)
+    stale.add(tagName)
+    // 按（站，指标）维度记行：多个指标共用同一 tagName 时各自可追溯，
+    // 不再折成一条归属不明的缺口。
+    for (const station of stations) {
+      for (const metric of station.metrics) {
+        if (metric.tagName !== tagName) continue
+        fetchErrors.push({
+          stationId: station.id,
+          metric: metric.metric,
+          tagName,
+          code: DUTY_GAP_CODES.DATA_STALE,
+          reason: `测点 ${tagName} 实时值观测时间 ${entry.time} 不在值班时段 ${window.start} ~ ${window.end} 内（容差 ${formatTolerance(tolerance)}），疑似补报或数据滞后，按缺测处理`,
+        })
+      }
+    }
+  }
+  return stale
+}
+
+/** 容差展示：整小时显示小时（24 小时），否则分钟（90 分钟）——值班语境读法。 */
+function formatTolerance(ms: number): string {
+  const minutes = Math.round(ms / 60_000)
+  return minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`
+}
+
+/** 报告构建主链（台账 → AGP API → 超窗校验 → 研判 → 引用 → 事实包）。 */
+async function buildReport(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<{ pack: DutyFactPack; tagNames: string[] }> {
   const shiftStartRaw = typeof args.shift_start === 'string' ? args.shift_start.trim() : ''
   const shiftEndRaw = typeof args.shift_end === 'string' ? args.shift_end.trim() : ''
   if (shiftStartRaw === '' || shiftEndRaw === '') {
@@ -315,6 +376,15 @@ async function buildReport(args: Record<string, unknown>, ctx: ToolContext): Pro
     ctx.log?.(`generate_duty_report AGP API 拉取失败，报告按全缺口渲染: ${message.slice(0, 120)}`)
   }
 
+  // 观测时间超窗 → 剔除并记 DATA_STALE（补报防护；容差 duty.staleToleranceMs）。
+  const staleTagNames = filterStaleObservations(
+    values,
+    { start: shiftStart, end: shiftEnd },
+    ctx.config.duty.staleToleranceMs,
+    stations,
+    fetchErrors,
+  )
+
   // 4. 规程引用：入参 provided 优先；否则知识面自动检索（失败不阻断，记缺口）。
   let citations = toProvidedCitations(args.citations)
   let citationGap: string | null = null
@@ -334,6 +404,7 @@ async function buildReport(args: Record<string, unknown>, ctx: ToolContext): Pro
     stations,
     values,
     fetchErrors,
+    staleTagNames,
     reporting: ctx.config.duty.reporting,
     citations,
   })
@@ -346,7 +417,7 @@ async function buildReport(args: Record<string, unknown>, ctx: ToolContext): Pro
       reason: citationGap,
     })
   }
-  return pack
+  return { pack, tagNames }
 }
 
 /** 白班/夜班推断（08:00-20:00 白班；shell 层展示用）。 */

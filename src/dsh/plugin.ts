@@ -164,6 +164,8 @@ export const Config = z.object({
   duty: z.object({
     project: z.string().default('').description('值班报告的工程/河段名（报告头，如"桃曲坡水库"）'),
     outputDir: z.string().default('').description('报告产物目录；留空 = $DSH_HOME/outputs（再退 ./outputs）。报告 HTML 只写此目录'),
+    staleToleranceMs: z.number().min(0).default(86_400_000)
+      .description('观测时间容差（毫秒）：实时值观测时间在值班时段外但未超出容差仍入报（遥测滞后/交接班延迟）；超出 → 记 DATA_STALE 缺口、按缺测研判（补报历史班次防护）'),
     stations: z.array(z.object({
       id: z.string().description('测站 id（报告与规则 id 引用；字母/数字/下划线/中文/连字符）'),
       name: z.string().description('测站名称'),

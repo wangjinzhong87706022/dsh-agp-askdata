@@ -111,6 +111,21 @@ describe('evaluateDutyRules', () => {
     expect(out.thresholds.every((t) => t.exceeded === null && t.observedValue === null)).toBe(true)
   })
 
+  it('staleTagNames：超窗测点按缺测研判但不重复记 DATA_MISSING（DATA_STALE 由工具层记）', () => {
+    const out = evaluateDutyRules({
+      stations: STATIONS,
+      values: valuesOf([]),
+      fetchErrors: [{ stationId: 'TQP-RAIN', metric: 'rainfall', tagName: 'TQPRN001_1O_100620000030002', code: 'DATA_STALE', reason: '观测时间超窗' }],
+      staleTagNames: new Set(['TQPRN001_1O_100620000030002']),
+    })
+    expect(out.telemetry).toHaveLength(0)
+    // 雨量 = DATA_STALE（工具层已记，不重复）；水位 = 普通缺测 DATA_MISSING
+    expect(out.abstentions).toHaveLength(2)
+    expect(out.abstentions.map((a) => a.code).sort()).toEqual(['DATA_MISSING', 'DATA_STALE'])
+    expect(out.thresholds.filter((t) => t.metric === 'rainfall').every((t) => t.exceeded === null)).toBe(true)
+    expect(out.thresholds.every((t) => t.decimals === (t.metric === 'rainfall' ? 1 : 2))).toBe(true)
+  })
+
   it('低于型阈值（op=<=）：低于阈值即命中且方向为"低于"', () => {
     const stations: DutyStation[] = [{
       id: 'S',

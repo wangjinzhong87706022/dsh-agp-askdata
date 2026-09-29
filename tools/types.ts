@@ -91,10 +91,17 @@ export interface SqlPlan {
 }
 
 /** 数值列转换：null/undefined 透传为 null，其余 Number。 */
-export function toNumber(value: string | null | undefined): number | null {
+export function toNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null
-  const n = Number(value)
-  return Number.isNaN(n) ? null : n
+  // 通道行可能直接带 JSON number（meta 面）；Number.isFinite 收 Infinity/NaN。
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  // 只认纯十进制形态：Number('')/Number(' ')=0、Number('0x10')=16、Number('Infinity')
+  // 都会把非数值静默变成可用观测值，违反缺测不编造红线。
+  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(text)) return null
+  const n = Number(text)
+  return Number.isFinite(n) ? n : null
 }
 
 /**

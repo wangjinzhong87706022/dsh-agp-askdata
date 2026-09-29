@@ -37,6 +37,8 @@ export interface DutyThresholdRow {
   level: string
   thresholdValue: number
   op: NonNullable<DutyThreshold['op']>
+  /** 展示小数位（与观测值一致，来自台账 metric.decimals；缺省 2）。 */
+  decimals?: number
   /** 本次观测值（对照用；null = 缺测未对照）。 */
   observedValue: number | null
   exceeded: boolean | null

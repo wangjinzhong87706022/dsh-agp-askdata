@@ -823,7 +823,8 @@ meta_filter 场次限定生效。dsh web E2E 10/11（六条功能链路全过；
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `duty.project` | 空 | 工程/河段名（报告头） |
-| `duty.outputDir` | 空 | 产物目录；空 = `$DSH_HOME/outputs` 再退 `./outputs` |
+| `duty.outputDir` | 空 | 产物目录；空 = `$DSH_HOME/outputs` 再退 `./outputs`；文件名带 queryId 前 8 位（同班次重生成不覆盖历史） |
+| `duty.staleToleranceMs` | 86400000（24h） | 观测时间容差：实时值观测时间在值班时段外但未超出容差仍入报（遥测滞后/交接班延迟）；超出 → 记 `DATA_STALE` 缺口、按缺测研判（补报历史班次时 AGP API 只给当前最新值，防"旧时段标题 + 新数据"假报告） |
 | `duty.stations[]` | 空（面不可用，调用期明确提示） | 测站台账：id/name/metrics[]；metric = {metric 键, label, unit, **tagName（AGP 测点全名）**, decimals, thresholds[]}；threshold = {level, value, op?（缺省 >=）}，无 thresholds = 只汇总不研判 |
 | `duty.reporting[]` | 空 | 报讯路径（第 7 段）：{object, channel?, frequency?}，配置化不由 LLM 生成 |
 
@@ -842,9 +843,10 @@ meta_filter 场次限定生效。dsh web E2E 10/11（六条功能链路全过；
   pack_hash 确定性与 hard/soft 分层、渲染 8 段/转义/内嵌包还原/出闸校验三反面、
   工具行为（mock fetch：POST 主路/GET 回落/全缺口渲染/citations 优先/环境变量凭据回退/
   台账与时段校验）、duty 配置装配与非法台账报错）；`tsc --noEmit` 0 错误。
-- 工具级 E2E（`scripts/e2e-duty-report.ts` + `scripts/mock-agp-api.mjs`，mock 网关 8410）：
-  **14/14 通过**——台账投影、AGP API 取数（executor 零调用）、超警戒命中、8 段落盘、
-  离线单文件、内嵌包重渲染幂等。
+- 工具级 E2E（`scripts/e2e-duty-report.ts` + `scripts/mock-agp-api.mjs`，mock 网关 18410
+  ——端口避开 Windows 保留区段）：**17/17 通过**——台账投影、AGP API 取数（executor 零调用）、
+  超警戒命中、8 段落盘、离线单文件、内嵌包重渲染幂等、补报防护（历史班次 + 当前最新值 →
+  DATA_STALE 全缺口）。
 - **Playwright DSH web 端到端 15/15 通过**（`E:\git\deepseek-harness\apps\web\tests\e2e-duty-report.mjs`，
   web 3080 + `--patch duty-e2e.patch.yml` 把 AGP API 指向 mock）：对话发起 →
   模型四步流程（list_duty_stations → knowledge_search 取证 → generate_duty_report →
