@@ -140,15 +140,26 @@ export const Config = z.object({
 
   knowledge: z.object({
     ragflowBaseUrl: z.string().default('https://labragf.openagp.top:9080')
-      .description('RAGFlow 实例基址（不含 /api/v1；客户端自动拼接）'),
+      .description('RAGFlow 实例基址（不含 /api/v1；客户端自动拼接；多租户共用同一实例）'),
     ragflowApiKey: z.string().role('secret').default('')
-      .description('RAGFlow API Key（Bearer；进程内使用不落盘。留空回退环境变量 RAGFLOW_API_KEY）'),
+      .description('遗留单租户 API Key（tenants 非空时忽略）。留空回退环境变量 RAGFLOW_API_KEY'),
     datasetIds: z.array(z.string()).default([])
-      .description('知识检索目标数据集 id 列表（RAGFlow dataset id；空 = 知识工具不可用，取数面不受影响）'),
+      .description('遗留单租户检索目标数据集（tenants 非空时忽略；空 = 知识工具不可用，取数面不受影响）'),
     timeoutMs: z.number().default(20_000).min(1000).description('单次知识调用超时（毫秒）'),
-    maxChunks: z.number().default(8).min(1).max(50).description('knowledge_search 默认返回片段数'),
-    maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph / knowledge_mindmap 默认实体/节点预算（服务端上限 1024）'),
-  }).collapse().description('RAGFlow 知识面（graph/wiki/原文检索；问数的第二数据源：TSDB 给数值，知识库给依据）'),
+    maxChunks: z.number().default(8).min(1).max(50).description('knowledge_search 默认返回片段数（根配置；租户可覆写）'),
+    maxGraphEntities: z.number().default(60).min(1).max(1024).description('knowledge_graph / knowledge_mindmap 默认实体/节点预算（服务端上限 1024；租户可覆写）'),
+    defaultTenant: z.string().default('')
+      .description('兜底租户 id（会话未携带租户标识时使用）。单租户留空自动取唯一租户；多租户建议显式配置，留空 = 未解析即报错（防跨租户误用）'),
+    tenants: z.array(z.object({
+      id: z.string().required().description('租户标识（小写 kebab-case，如 tqp/jhq/zuhe）'),
+      ragflowApiKey: z.string().role('secret').default('')
+        .description('该租户 RAGFlow API Key（Bearer；key 即租户边界）。留空回退环境变量 RAGFLOW_API_KEY_<ID大写>'),
+      datasetIds: z.array(z.string()).default([]).description('该租户检索目标数据集 id 列表'),
+      maxChunks: z.number().min(1).max(50).description('覆写返回片段预算（缺省继承根配置）'),
+      maxGraphEntities: z.number().min(1).max(1024).description('覆写实体/节点预算（缺省继承根配置）'),
+    })).default([])
+      .description('多租户注册表（API key 即租户边界：key 属于谁就只能检索谁的数据集）；空 = 走上方遗留单租户形态'),
+  }).collapse().description('RAGFlow 知识面（多租户 graph/wiki/原文检索；问数的第二数据源：TSDB 给数值，知识库给依据）'),
 
   duty: z.object({
     project: z.string().default('').description('值班报告的工程/河段名（报告头，如"桃曲坡水库"）'),

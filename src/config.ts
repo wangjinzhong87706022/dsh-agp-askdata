@@ -212,20 +212,44 @@ export interface DutyConfig {
  *
  * 知识面是问数的第二数据源：TSDB 给数值，RAGFlow 给依据（规程原文、实体关系、
  * 百科页面）。全部经 HTTP 只读检索端点访问，不触碰 SQL 取数面。
+ *
+ * 多租户：RAGFlow 的 API key 即租户边界（key 属于谁就只能检索谁的数据集），
+ * 租户 = {id, key, datasetIds} 的注册表；遗留单租户形态（根配置 ragflowApiKey +
+ * datasetIds）在 tenants 为空时折算为 id=default 的单租户，部署无需迁移。
  */
-export interface KnowledgeConfig {
-  /** RAGFlow 实例基址（不含 /api/v1；客户端自动拼接）。 */
-  ragflowBaseUrl: string
-  /** API Key（Bearer）。进程内使用，不落盘、不进日志；留空时回退环境变量 RAGFLOW_API_KEY。 */
+export interface KnowledgeTenantConfig {
+  /** 租户标识（小写 kebab-case；会话身份解析与 defaultTenant 引用它）。 */
+  id: string
+  /** 该租户的 API Key（Bearer）。进程内使用，不落盘、不进日志；留空回退环境变量 RAGFLOW_API_KEY_<ID大写>。 */
   ragflowApiKey: string
-  /** 检索目标数据集 id 列表（空 = 知识工具不可用，调用期给出明确提示）。 */
+  /** 该租户的检索目标数据集 id 列表。 */
+  datasetIds: string[]
+  /** 覆写根配置 knowledge.maxChunks（缺省继承）。 */
+  maxChunks?: number
+  /** 覆写根配置 knowledge.maxGraphEntities（缺省继承）。 */
+  maxGraphEntities?: number
+}
+
+export interface KnowledgeConfig {
+  /** RAGFlow 实例基址（不含 /api/v1；客户端自动拼接）。多租户共用同一实例。 */
+  ragflowBaseUrl: string
+  /** 遗留单租户 API Key；tenants 非空时忽略。留空回退环境变量 RAGFLOW_API_KEY。 */
+  ragflowApiKey: string
+  /** 遗留单租户数据集；tenants 非空时忽略。空 = 知识工具不可用。 */
   datasetIds: string[]
   /** 单次知识调用超时（毫秒）。 */
   timeoutMs: number
-  /** knowledge_search 默认返回片段数。 */
+  /** knowledge_search 默认返回片段数（根配置；租户可覆写）。 */
   maxChunks: number
-  /** knowledge_graph 默认实体预算（服务端 top_n 上限 1024）。 */
+  /** knowledge_graph 默认实体预算（服务端 top_n 上限 1024；租户可覆写）。 */
   maxGraphEntities: number
+  /**
+   * 兜底租户 id：会话未携带租户标识时使用。单租户部署留空自动取唯一租户；
+   * 多租户建议显式配置；多租户且留空 = 未解析即报错（fail loud，防跨租户误用）。
+   */
+  defaultTenant: string
+  /** 租户注册表（多租户形态；空 = 走遗留单租户）。 */
+  tenants: KnowledgeTenantConfig[]
 }
 
 /** 插件完整配置。 */
@@ -261,6 +285,9 @@ const TIME_ZONE_RE = /^[+-]\d{2}:\d{2}$/
 
 /** RAGFlow 数据集 id 形态（线上为 24 位 hex；下界 3 防空值，禁特殊字符防 URL 路径注入）。 */
 const DATASET_ID_RE = /^[0-9a-zA-Z-]{3,64}$/
+
+/** 知识面租户 id 形态（小写 kebab-case；defaultTenant 与环境变量名引用它）。 */
+const TENANT_ID_RE = /^[a-z][a-z0-9_-]{1,31}$/
 
 /** RAGFlow 基址只允许 http(s)，且不含路径后缀（/api/v1 由客户端拼接）。 */
 function normalizeRagflowBaseUrl(value: string): string {
@@ -369,6 +396,8 @@ const DEFAULT_CONFIG: Omit<AskdataConfig, 'connection'> = {
     timeoutMs: 20_000,
     maxChunks: 8,
     maxGraphEntities: 60,
+    defaultTenant: '',
+    tenants: [] as KnowledgeTenantConfig[],
   },
   // 值班报告面默认空台账：防汛值班工具在未配置测站时调用期明确报错，
   // 不影响取数/知识面；阈值与报讯路径是工程专属部署事实，不内嵌默认值。
@@ -482,11 +511,16 @@ export function resolveConfig(input: AskdataConfigInput): AskdataConfig {
 }
 
 /**
- * 知识面配置解析：基址归一化 + 数据集 id 形态校验 + 环境变量凭据回退。
+ * 知识面配置解析：基址归一化 + 数据集 id 形态校验 + 环境变量凭据回退 + 租户注册表归一。
  *
- * 凭据优先级：显式配置 > 环境变量 RAGFLOW_API_KEY。两者都空时保留空串——
- * 知识工具调用期报明确错误（与 TSDB 面"未配置mysqlConnection"同一模式），
- * 不阻断取数面启动。
+ * 凭据优先级（每个租户独立）：显式配置 > 环境变量 RAGFLOW_API_KEY_<ID大写>。
+ * 遗留单租户（根配置 ragflowApiKey + datasetIds）回退 RAGFLOW_API_KEY。
+ * key 全空的租户/遗留形态保留空串——知识工具调用期报明确错误（与 TSDB 面
+ * "未配置mysqlConnection"同一模式），不阻断取数面启动。
+ *
+ * 租户归一：tenants 非空 = 多租户形态（忽略遗留 key/datasetIds）；
+ * tenants 为空且遗留 datasetIds 非空 = 折算为 id=default 的单租户；
+ * defaultTenant 缺省取唯一租户，多租户未配置且未解析到租户时调用期 fail loud。
  */
 export function resolveKnowledgeConfig(input?: Partial<KnowledgeConfig>): KnowledgeConfig {
   const merged = { ...DEFAULT_CONFIG.knowledge, ...input }
@@ -499,13 +533,59 @@ export function resolveKnowledgeConfig(input?: Partial<KnowledgeConfig>): Knowle
     }
   }
   const timeoutMs = Math.max(1000, Math.trunc(merged.timeoutMs))
+  const clampChunks = (n: number) => Math.min(50, Math.max(1, Math.trunc(n)))
+  const clampEntities = (n: number) => Math.min(1024, Math.max(1, Math.trunc(n)))
+
+  const rawTenants = Array.isArray(merged.tenants) ? merged.tenants : []
+  const tenants: KnowledgeTenantConfig[] = []
+  if (rawTenants.length > 0) {
+    const seen = new Set<string>()
+    for (const t of rawTenants) {
+      const id = String(t?.id ?? '').trim()
+      if (!TENANT_ID_RE.test(id)) {
+        throw new Error(`配置错误：knowledge.tenants 含非法租户 id: ${id || '（空）'}（只允许小写字母开头的 kebab-case，2-32 字符）`)
+      }
+      if (seen.has(id)) throw new Error(`配置错误：knowledge.tenants 租户 id 重复: ${id}`)
+      seen.add(id)
+      const datasetIds = (Array.isArray(t?.datasetIds) ? t.datasetIds : []).map(String)
+      for (const ds of datasetIds) {
+        if (!DATASET_ID_RE.test(ds)) throw new Error(`配置错误：knowledge.tenants[${id}].datasetIds 含非法数据集 id: ${ds}`)
+      }
+      const explicitKey = String(t?.ragflowApiKey ?? '').trim()
+      const ragflowApiKey = explicitKey !== ''
+        ? explicitKey
+        : (process.env[`RAGFLOW_API_KEY_${id.replace(/-/g, '_').toUpperCase()}`] ?? '').trim()
+      tenants.push({
+        id,
+        ragflowApiKey,
+        datasetIds,
+        ...(t?.maxChunks != null && Number.isFinite(Number(t.maxChunks)) ? { maxChunks: clampChunks(Number(t.maxChunks)) } : {}),
+        ...(t?.maxGraphEntities != null && Number.isFinite(Number(t.maxGraphEntities)) ? { maxGraphEntities: clampEntities(Number(t.maxGraphEntities)) } : {}),
+      })
+    }
+  } else if (merged.datasetIds.length > 0) {
+    // 遗留单租户折算（只认 datasetIds 非空）：部署不迁移也能跑，defaultTenant 自动指向它。
+    // 仅有 key 无数据集时不折算——知识面按"未装配"处理，避免产出空检索目标的假租户。
+    tenants.push({ id: 'default', ragflowApiKey: apiKey, datasetIds: [...merged.datasetIds] })
+  }
+
+  const explicitDefault = String(merged.defaultTenant ?? '').trim()
+  const defaultTenant = explicitDefault !== ''
+    ? explicitDefault
+    : tenants.length === 1 ? tenants[0]!.id : ''
+  if (defaultTenant !== '' && !tenants.some((t) => t.id === defaultTenant)) {
+    throw new Error(`配置错误：knowledge.defaultTenant 引用了不存在的租户: ${defaultTenant}（可用：${tenants.map((t) => t.id).join('、') || '（无）'}）`)
+  }
+
   return {
     ragflowBaseUrl: normalizeRagflowBaseUrl(merged.ragflowBaseUrl),
     ragflowApiKey: apiKey,
     datasetIds: [...merged.datasetIds],
     timeoutMs,
-    maxChunks: Math.min(50, Math.max(1, Math.trunc(merged.maxChunks))),
-    maxGraphEntities: Math.min(1024, Math.max(1, Math.trunc(merged.maxGraphEntities))),
+    maxChunks: clampChunks(merged.maxChunks),
+    maxGraphEntities: clampEntities(merged.maxGraphEntities),
+    defaultTenant,
+    tenants,
   }
 }
 

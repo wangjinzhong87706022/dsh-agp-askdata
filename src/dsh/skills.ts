@@ -165,7 +165,37 @@ Y = 年聚合（1Y 走 WT_CUBE）
 - tag_filter：必带 \`^\` 锚定，匹配一个具体粒度+设备前缀；\`^HWNBYC174_1D_100620000015524\` 是最理想形态。
 - 查询时窗：先用 estimate_count 看扫描量，超过 \`system.maxScanRows\` 时改用 1D 粒度 + aggregate（cube 路由自动生效）。
 
-## 4. 强制约束（persona 硬性约束）
+## 4. 知识取证的引用输出（citations 围栏模板）
+
+knowledge_search 取证后，回答末尾输出一张依据卡，正文结论处用 \`[[N]]\` 角标指向条目。
+**套用模板照抄换数据，溯源锚字段逐字照抄工具行**：
+
+\`\`\`dsh-ui
+{"type":"citations","title":"依据","items":[
+ {"n":1,"doc":"03-汛期调度运用计划.pdf","page":18,"clause":"2.5 汛限水位",
+  "quote":"主汛期定为7、8、9月份，限制水位786.80m；次汛期为6、10月份，限制水位788.00m。",
+  "documentId":"（照抄文档ID列，hex 串，必填：打开原文的主键）",
+  "chunkId":"（选填展示用）",
+  "positions":[[18,108,255,221,236]]}]}
+\`\`\`
+
+字段规则（写错字段名 = 整卡被丢弃）：
+- \`n\`：从 1 连续编号，与正文 \`[[N]]\` 角标一一对应；一条回答**最多一张卡**。
+- \`doc\`：出处文档名（工具行 document 列原文）；\`page\`：pageNum（为 0 时省略本字段）。
+- \`clause\`：可选，知道条款号才写（如 "2.5 汛限水位"）。
+- \`quote\`：片段原文摘录，≤120 字，从工具行 content 列截取，不得改写数值。
+- \`chunkId\` / \`documentId\` / \`positions\`：**逐字照抄工具行同名列**；缺失的整个字段省略
+  （不写 null/空串）。documentId 是 hex 串，**绝不拿文档名冒充**（代理会 400）。
+  \`positions\` 是 \`[page,x0,x1,top,bottom]\` 数组，原样抄不改格式（原文查看器靠它跳页）。
+- 检索为空就不输出围栏，明说资料不足。**依据卡只装引用条目**——不要拿 chart/table
+  等其它组件冒充依据卡，也不要在卡里塞非引用数据（JSON 写错整卡会被丢弃）。
+
+图片嵌入（公式/插图 chunk）：片段行带 \`imageId\` 列时，正文用 Markdown 图片就地嵌入
+\`![图注](/api/ragflow/images/<imageId>)\`（同源相对路径；宿主页面可加载），并用文字解释
+图中力学关系/结构含义——图注与解释只来自该片段的文本内容，不编造图中未含的信息。
+公式用 \`$…$\` / \`$$…$$\` 呈现；竖表数据还原为表格（行列方向与原文一致），数值逐个照抄。
+
+## 5. 强制约束（persona 硬性约束）
 
 - LLM 不能直接拼裸 SQL；任何 SQL 都被闸门拦截。
 - 所有取数走 askdata 工具，不接受"我自己写 SQL"的请求。
@@ -210,6 +240,9 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | \`security.tableWhitelist\` | WT_TAG/WT_DATA/WT_CUBE/WT_DEVICE | 基础库白名单 | 加新表时追加 |
 | \`security.mysqlTableWhitelist\` | 7 个 wisetao_meta.* + bole.* | MySQL 白名单 | 跨库新表时追加 |
 | \`knowledge.ragflowBaseUrl\` | https://labragf.openagp.top:9080 | RAGFlow 实例基址（不含 /api/v1） | 换实例时改 |
+| \`knowledge.tenants[]\` | 空（走遗留单租户） | 多租户注册表 {id, ragflowApiKey, datasetIds, maxChunks?, maxGraphEntities?}；API key 即租户边界，key 留空回退 RAGFLOW_API_KEY_<ID大写> | 接多租户 RAGFlow 时配置 |
+| \`knowledge.defaultTenant\` | 空（单租户自动取唯一租户） | 会话未携带租户标识时的兜底租户 id | 多租户部署必配（留空=未解析即报错，防跨租户误用） |
+| \`DSH_ASKDATA_TENANT\`（环境变量） | 空 | 进程级租户覆盖：非空时每次工具调用注入该 tenantId（优先于 defaultTenant） | E2E/临时切租户，不改配置 |
 | \`knowledge.ragflowApiKey\` | 空（回退环境变量 RAGFLOW_API_KEY） | 知识面 Bearer 凭据 | 生产必须配 |
 | \`knowledge.datasetIds\` | 空（知识工具不可用） | 知识检索目标数据集 | 启用知识面必填 |
 | \`knowledge.maxChunks\` / \`knowledge.maxGraphEntities\` | 8 / 60 | 知识面返回量预算 | 上下文吃紧时调小 |

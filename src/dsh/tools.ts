@@ -31,6 +31,10 @@ export const Config = z.object({})
  * 注册全部工具（P0 + P1）。每个 AskdataTool 适配为 DSH 工具定义；取消信号与
  * 审计链游标在每次调用时注入工具上下文。
  *
+ * 租户接线（方案 1 的会话级覆盖点）：环境变量 `DSH_ASKDATA_TENANT` 非空时作为
+ * 每次调用的 tenantId 注入（优先于 knowledge.defaultTenant）；宿主将来把会话/用户
+ * 身份透传到本行后，把 env 读取替换为按会话映射即可。留空 = 走 defaultTenant。
+ *
  * `ctx.tools` 由 DSH 宿主的 tools 服务合并进 Context（@deepseek-ai/dsh-tools
  * RC 依赖链暂不可安装，故此处用结构化视图桥接，不做模块声明合并——避免与
  * 宿主侧真实类型冲突）。运行时形状以 harness packages/core/tools 为准。
@@ -38,6 +42,8 @@ export const Config = z.object({})
 export function apply(ctx: Context): void {
   const host = ctx as Context & { tools: { register(definition: AskdataToolDefinition): void } }
   const service: AskdataService = host.askdata
+  const envTenant = (process.env.DSH_ASKDATA_TENANT ?? '').trim()
+  const tenantId = envTenant !== '' ? envTenant : undefined
   let prevAuditHash = ''
 
   for (const tool of service.tools) {
@@ -47,6 +53,7 @@ export function apply(ctx: Context): void {
         const toolContext = service.createContext({
           prevAuditHash,
           signal,
+          ...(tenantId !== undefined ? { tenantId } : {}),
           onAudit: (row) => {
             prevAuditHash = row.resultHash
           },

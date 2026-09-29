@@ -11,11 +11,17 @@
 
 import type { AskdataTool } from './types.ts'
 import type { ResultField } from '../src/result.ts'
-import { requireKnowledge, runKnowledgeTool, truncate } from './knowledge-common.ts'
+import { joinLimited, requireKnowledge, runKnowledgeTool, truncate, truncateNoted } from './knowledge-common.ts'
 import { askdataError } from '../src/errors.ts'
 
-/** 页面正文进入上下文的长度上限（百科页 200-500 字，封顶从宽）。 */
+/** 页面正文进入上下文的长度上限（百科页 200-500 字，封顶从宽；截断时带原文长度注记）。 */
 const MAX_PAGE_CHARS = 4000
+
+/** 出链/关联页面列表的展示上限（超出带计数注记）。 */
+const MAX_LINK_ITEMS = 30
+
+/** 单页工具只有一行结果，声明小值避免吃掉宿主默认预览额度的语义。 */
+const PREVIEW_LIMIT = 5
 
 const FIELDS: ResultField[] = [
   { name: 'title', title: '页面标题', type: 'string' },
@@ -35,6 +41,7 @@ export const knowledgeWikiPageTool: AskdataTool = {
     + '（自动定位最贴合的页面）。页面含摘要、正文与出链/关联页面，用于在 knowledge_search 命中后深入了解'
     + '某实体（工程、机构、规程、概念）的全景描述。',
   layer: 'base_business',
+  previewLimit: PREVIEW_LIMIT,
   inputSchema: {
     type: 'object',
     properties: {
@@ -60,11 +67,18 @@ export const knowledgeWikiPageTool: AskdataTool = {
 
     return runKnowledgeTool(knowledgeWikiPageTool, args, ctx, async () => {
       const client = requireKnowledge(ctx)
-      const page = await client.getPage(slug || keywords, { signal: ctx.signal })
+      // 部分数据集失败在 apiOrSql 留痕（审计哈希链可见），不静默
+      let partialFailure = ''
+      const page = await client.getPage(slug || keywords, {
+        signal: ctx.signal,
+        onPartialFailure: (failed, total) => {
+          partialFailure = `（${failed}/${total} 数据集失败，结果可能不完整）`
+        },
+      })
       const base = `${ctx.config.knowledge.ragflowBaseUrl}/api/v1/datasets`
       if (!page) {
         return {
-          apiOrSql: `GET /artifacts/${slug || keywords} → 未找到页面`,
+          apiOrSql: `GET /artifacts/${slug || keywords} → 未找到页面${partialFailure}`,
           apiUrl: `${base}/{id}/artifacts`,
           fields: FIELDS,
           data: [{
@@ -79,7 +93,7 @@ export const knowledgeWikiPageTool: AskdataTool = {
         }
       }
       return {
-        apiOrSql: `GET /artifacts/${page.slug} → ${truncate(page.title, 30)}`,
+        apiOrSql: `GET /artifacts/${page.slug} → ${truncate(page.title, 30)}${partialFailure}`,
         apiUrl: `${base}/${page.datasetId}/artifacts/${page.slug}`,
         fields: FIELDS,
         data: [{
@@ -87,9 +101,9 @@ export const knowledgeWikiPageTool: AskdataTool = {
           pageType: page.pageType,
           topic: page.topic,
           summary: page.summary,
-          content: truncate(page.contentMd, MAX_PAGE_CHARS),
-          outlinks: page.outlinks.slice(0, 30).join('、'),
-          relatedPages: page.relatedPages.slice(0, 30).join('、'),
+          content: truncateNoted(page.contentMd, MAX_PAGE_CHARS),
+          outlinks: joinLimited(page.outlinks, MAX_LINK_ITEMS),
+          relatedPages: joinLimited(page.relatedPages, MAX_LINK_ITEMS),
         }],
       }
     })

@@ -56,6 +56,21 @@ describe('RagflowClient.searchChunks（POST /datasets/search）', () => {
     expect(chunks[0]!.positions).toEqual([[18, 108, 255, 221, 236]])
   })
 
+  it('positions 净化：null 页码/短行/非有限坐标行丢弃（对齐 dsh-ragflow 契约）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        chunks: [{
+          content_with_weight: 'x', doc_id: 'd', docnm_kwd: 'n',
+          positions: [[null, 1, 2, 3, 4], [3, 1, 2], [2, 1, 2, 3, 'x'], [0, 1, 2, 3, 4], [5, 10, 20, 30, 40]],
+        }],
+      },
+    }))
+    const { chunks } = await client(undefined, fetchImpl as never).searchChunks('q')
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]!.positions).toEqual([[5, 10, 20, 30, 40]])
+  })
+
   it('出处字段双契约：线上 doc_id/docnm_kwd 与旧版 document_id/document_keyword 都认', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({
       code: 0,
@@ -180,6 +195,25 @@ describe('RagflowClient.subgraph（GET /artifacts/graph）', () => {
     expect(url).not.toContain('node=')
   })
 
+  it('同一实体对不同谓词的关系各自成边（去重键含 predicate）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        entities: [
+          { slug: 'entity/A', name: 'A', description: '' },
+          { slug: 'entity/B', name: 'B', description: '' },
+        ],
+        relations: [
+          { from: 'entity/A', to: 'entity/B', predicate: '任职于' },
+          { from: 'entity/A', to: 'entity/B', predicate: '管理' },
+          { from: 'entity/A', to: 'entity/B', predicate: '任职于' },
+        ],
+      },
+    }))
+    const sub = await client(undefined, fetchImpl as never).subgraph({ keywords: 'x' })
+    expect(sub.relations.map((r) => r.predicate).sort()).toEqual(['任职于', '管理'])
+  })
+
   it('全部数据集失败才抛错；部分失败返回已合并结果', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.includes('/ds1/')) return jsonResponse({ code: 0, data: { entities: [{ slug: 'entity/A', name: 'A', description: '' }], relations: [] } })
@@ -234,6 +268,64 @@ describe('RagflowClient.getPage / listPages', () => {
     await expect(client(undefined, fetchImpl as never).getPage('entity/不存在')).resolves.toBeNull()
   })
 
+  it('slug 直取支持任意小写 page_type（如 regulation/，不再被误判为关键词）', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/ds1/artifacts/regulation/')) {
+        return jsonResponse({ code: 0, data: { slug: 'regulation/汛期调度', title: '汛期调度', page_type: 'regulation', summary: 's', content_md_rendered: '正文' } })
+      }
+      return jsonResponse({ code: 0, data: null })
+    })
+    const page = await client(undefined, fetchImpl as never).getPage('regulation/汛期调度')
+    expect(page?.title).toBe('汛期调度')
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
+    expect(url).toContain('/artifacts/regulation/')
+  })
+
+  it('全部数据集业务失败 → 抛错（不吞成"页面不存在"）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 100, message: 'Authentication failed' }))
+    await expect(client(undefined, fetchImpl as never).getPage('entity/桃曲坡水库')).rejects.toThrow(RagflowApiError)
+  })
+
+  it('部分数据集失败且未找到 → 返回 null 并回调 onPartialFailure', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/ds1/')) return jsonResponse({ code: 0, data: null })
+      return jsonResponse({ code: 100, message: 'boom' })
+    })
+    const reports: Array<[number, number]> = []
+    const page = await client(undefined, fetchImpl as never).getPage('entity/不存在', {
+      onPartialFailure: (failed, total) => reports.push([failed, total]),
+    })
+    expect(page).toBeNull()
+    expect(reports).toEqual([[1, 2]])
+  })
+
+  it('单数据集网络失败不拖垮 getPage（对齐 listPages/subgraph 语义）', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/ds1/')) throw new Error('network down')
+      return jsonResponse({ code: 0, data: { slug: 'entity/A', title: 'A', page_type: 'entity', summary: 's', content_md_rendered: 'x' } })
+    })
+    const page = await client(undefined, fetchImpl as never).getPage('entity/A')
+    expect(page?.title).toBe('A')
+  })
+
+  it('listPages 不再先到先得：前置数据集吃满 limit 仍查询后置数据集', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/ds1/')) {
+        return jsonResponse({
+          code: 0,
+          data: { total: 3, items: ['甲', '乙', '丙'].map((n) => ({ slug: `entity/ds1-${n}`, title: `ds1-${n}`, page_type: 'entity', summary: 's' })) },
+        })
+      }
+      return jsonResponse({
+        code: 0,
+        data: { total: 1, items: [{ slug: 'entity/ds2-丁', title: 'ds2-丁', page_type: 'entity', summary: 's' }] },
+      })
+    })
+    const items = await client(undefined, fetchImpl as never).listPages({ keywords: 'x', limit: 3 })
+    expect((fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(2)
+    expect(items).toHaveLength(3)
+  })
+
   it('listPages 合并多数据集并按 limit 截断', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       const ds = url.includes('/ds1/') ? 'ds1' : 'ds2'
@@ -255,6 +347,12 @@ describe('RagflowClient.getPage / listPages', () => {
 })
 
 describe('RagflowClient.structure / mindmap', () => {
+  it('structure kind 非法 → INVALID_PARAM（不触网）', async () => {
+    const fetchImpl = vi.fn()
+    await expect(client(undefined, fetchImpl as never).structure('bogus')).rejects.toMatchObject({ code: 'INVALID_PARAM' })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
   it('kind 透传 + entities/relations 归一', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({
       code: 0,
@@ -298,11 +396,12 @@ describe('RagflowClient.structure / mindmap', () => {
     const sub = await client(undefined, fetchImpl as never).structure('mindmap')
     expect(sub.relations[0]).toMatchObject({ from: '应急预案', to: '应急响应', predicate: 'has_branch' })
 
-    const forest = await client(undefined, fetchImpl as never).mindmap()
+    const { forest, totalNodes, expandedNodes, incomplete } = await client(undefined, fetchImpl as never).mindmap()
     expect(forest).toHaveLength(1)
     expect(forest[0]).toMatchObject({ name: '应急预案', type: 'central_topic' })
     expect(forest[0]!.children[0]).toMatchObject({ name: '应急响应' })
     expect(forest[0]!.children[0]!.children[0]).toMatchObject({ name: 'I级响应' })
+    expect({ totalNodes, expandedNodes, incomplete }).toEqual({ totalNodes: 3, expandedNodes: 3, incomplete: false })
   })
 
   it('mindmap 环/悬空边安全：自环与未知目标跳过，无 central_topic 时无父节点为根', async () => {
@@ -324,7 +423,7 @@ describe('RagflowClient.structure / mindmap', () => {
         }],
       },
     }))
-    const forest = await client(undefined, fetchImpl as never).mindmap()
+    const { forest } = await client(undefined, fetchImpl as never).mindmap()
     expect(forest).toHaveLength(1)
     expect(forest[0]!.name).toBe('A')
     expect(forest[0]!.children.map((c) => c.name)).toEqual(['B'])
@@ -333,28 +432,49 @@ describe('RagflowClient.structure / mindmap', () => {
 
   it('mindmap keywords 透传服务端', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [] } }))
-    const forest = await client(undefined, fetchImpl as never).mindmap({ keywords: '应急响应' })
+    const { forest, incomplete } = await client(undefined, fetchImpl as never).mindmap({ keywords: '应急响应' })
     expect(forest).toEqual([])
+    expect(incomplete).toBe(false)
     const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string]
     expect(url).toContain('kind=mindmap')
     expect(url).toContain('keywords=')
   })
 
-  it('mindmap 节点预算封顶（maxGraphEntities）', async () => {
+  it('mindmap 节点预算封顶（maxGraphEntities）→ incomplete=true 并报告展开数', async () => {
     const entities = Array.from({ length: 10 }, (_, i) => ({ name: `N${i}`, type: 'sub_branch', description: '', mention_count: 1, aliases: [], source_chunk_ids: [] }))
     const relations = entities.slice(0, -1).map((e, i) => ({ from: e.name, to: `N${i + 1}`, type: 'has_branch' }))
     const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [{ entities, relations }] } }))
-    const forest = await client({ maxGraphEntities: 4 }, fetchImpl as never).mindmap()
+    const { forest, totalNodes, expandedNodes, incomplete } = await client({ maxGraphEntities: 4 }, fetchImpl as never).mindmap()
     const count = (nodes: Array<{ children: unknown[] }>): number =>
       nodes.reduce((sum, n) => sum + 1 + count(n.children as Array<{ children: unknown[] }>), 0)
     expect(count(forest)).toBe(4)
+    expect({ totalNodes, expandedNodes, incomplete }).toEqual({ totalNodes: 10, expandedNodes: 4, incomplete: true })
+  })
+
+  it('searchChunks 同文去重：重复入库的同文片段只留首见（对齐 dsh-ragflow 契约）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        chunks: [
+          { content_with_weight: '主汛期汛限水位 786.8m', doc_id: 'd1', docnm_kwd: '副本.pdf' },
+          { content_with_weight: '主汛期汛限水位  786.8m', doc_id: 'd2', docnm_kwd: '调度规程.pdf' },
+          { content_with_weight: '防洪标准 100 年一遇', doc_id: 'd3', docnm_kwd: '调度规程.pdf' },
+        ],
+      },
+    }))
+    const { chunks } = await client(undefined, fetchImpl as never).searchChunks('q', { topK: 3 })
+    expect(chunks).toHaveLength(2)
+    expect(chunks[0]!.documentName).toBe('副本.pdf')
   })
 })
 
 describe('slug 工具函数', () => {
-  it('entitySlug：裸名补前缀，slug 原样', () => {
+  it('entitySlug：裸名补前缀，slug 原样（任意小写 page_type；单词斜杠与数字开头仍算裸名）', () => {
     expect(entitySlug('桃曲坡水库')).toBe('entity/桃曲坡水库')
     expect(entitySlug('concept/水位')).toBe('concept/水位')
+    expect(entitySlug('regulation/汛期调度')).toBe('regulation/汛期调度')
+    expect(entitySlug('a/b')).toBe('entity/a/b')
+    expect(entitySlug('2021-09 洪水')).toBe('entity/2021-09 洪水')
   })
   it('slugName：去前缀', () => {
     expect(slugName('entity/桃曲坡水库')).toBe('桃曲坡水库')
@@ -384,5 +504,14 @@ describe('取消与超时', () => {
     })
     await client({ timeoutMs: 5000 }, fetchImpl as never).searchChunks('x')
     expect(fetchImpl).toHaveBeenCalled()
+  })
+
+  it('超时（TimeoutError）与取消（AbortError）错误消息中文分流', async () => {
+    const timeoutFetch = vi.fn(async () => { throw new DOMException('signal timed out', 'TimeoutError') })
+    await expect(client(undefined, timeoutFetch as never).searchChunks('x'))
+      .rejects.toMatchObject({ code: 'BACKEND_DOWN', message: expect.stringContaining('超时') })
+    const abortFetch = vi.fn(async () => { throw new DOMException('This operation was aborted', 'AbortError') })
+    await expect(client(undefined, abortFetch as never).searchChunks('x'))
+      .rejects.toMatchObject({ code: 'BACKEND_DOWN', message: expect.stringContaining('取消') })
   })
 })

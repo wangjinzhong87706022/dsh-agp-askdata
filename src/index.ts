@@ -14,7 +14,7 @@ import { resolveConfig, type AskdataConfig, type AskdataConfigInput } from './co
 import { executeQuery } from './clients/starrocks.ts'
 import { executeQueryViaMysql2 } from './clients/starrocks-mysql2.ts'
 import { executeQueryViaMysql } from './clients/mysql-mysql2.ts'
-import { RagflowClient } from './clients/ragflow.ts'
+import { RagflowClient, bindKnowledgeTenant } from './clients/ragflow.ts'
 import { randomUUID } from 'node:crypto'
 import { p0Tools, p1Tools, subagentTools, knowledgeTools, dutyTools, metaTools } from '../tools/index.ts'
 import type { AskdataTool, SqlExecutor, ToolContext } from '../tools/index.ts'
@@ -31,10 +31,13 @@ export interface AskdataService {
   config: AskdataConfig
   /** 按配置 toolsets 过滤后的工具面（默认全开 = 24 个；云端 API 形态 12 个）。 */
   tools: AskdataTool[]
-  /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。 */
+  /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。
+   * tenantId = 本次调用归属的知识面租户（多租户形态；缺省走 defaultTenant，
+   * 宿主把会话/用户身份映射成租户 id 后在此注入）。 */
   createContext(options?: {
     prevAuditHash?: string
     signal?: AbortSignal
+    tenantId?: string
     onAudit?(row: AuditRow): void
   }): ToolContext
 }
@@ -57,11 +60,20 @@ function gate(executor: SqlExecutor, tableWhitelist: string[]): SqlExecutor {
  */
 export function createAskdataService(input: AskdataConfigInput): AskdataService {
   const config = resolveConfig(input)
-  // 知识面客户端：datasetIds 为空时不装配（知识工具调用期明确报错），
+  // 知识面：多租户注册表（方案 1）——每租户一个 RagflowClient（key 即租户边界），
+  // 租户为空（含遗留形态未配置 datasetIds）时不装配，知识工具调用期明确报错，
   // 取数面不受影响（P0 纯 TSDB 部署无 RAGFlow 也能跑）。
-  const knowledge = config.knowledge.datasetIds.length > 0
-    ? new RagflowClient(config.knowledge)
-    : undefined
+  const knowledgeClients = new Map<string, RagflowClient>()
+  for (const tenant of config.knowledge.tenants) {
+    knowledgeClients.set(tenant.id, new RagflowClient({
+      ragflowBaseUrl: config.knowledge.ragflowBaseUrl,
+      ragflowApiKey: tenant.ragflowApiKey,
+      datasetIds: tenant.datasetIds,
+      timeoutMs: config.knowledge.timeoutMs,
+      maxChunks: tenant.maxChunks ?? config.knowledge.maxChunks,
+      maxGraphEntities: tenant.maxGraphEntities ?? config.knowledge.maxGraphEntities,
+    }))
+  }
   const mysqlConfigured = config.mysqlConnection.host !== ''
   const mysqlExecutor: SqlExecutor = gate(
     {
@@ -105,7 +117,10 @@ export function createAskdataService(input: AskdataConfigInput): AskdataService 
         config,
         executor,
         mysqlExecutor,
-        knowledge,
+        knowledge: knowledgeClients.size > 0
+          ? bindKnowledgeTenant(knowledgeClients, options?.tenantId, config.knowledge.defaultTenant)
+          : undefined,
+        tenantId: options?.tenantId,
         signal: options?.signal,
         prevAuditHash: options?.prevAuditHash,
         onAudit: options?.onAudit,

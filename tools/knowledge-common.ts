@@ -12,14 +12,14 @@ import { applyAudit } from './types.ts'
 import type { ResultField, ToolResult } from '../src/result.ts'
 import { fail, ok } from '../src/result.ts'
 import { askdataError, AskdataError, type ErrorCode } from '../src/errors.ts'
-import { RagflowApiError, type RagflowClient } from '../src/clients/ragflow.ts'
+import { RagflowApiError, type KnowledgeClient } from '../src/clients/ragflow.ts'
 
-/** 取知识面客户端；未装配时抛明确错误（不静默失效）。 */
-export function requireKnowledge(ctx: ToolContext): RagflowClient {
+/** 取知识面客户端（租户绑定视图）；未装配时抛明确错误（不静默失效）。 */
+export function requireKnowledge(ctx: ToolContext): KnowledgeClient {
   if (!ctx.knowledge) {
     throw askdataError(
       'BACKEND_DOWN',
-      '知识面未装配：宿主未提供 RAGFlow 客户端（检查 knowledge.datasetIds 配置与插件装配）',
+      '知识面未装配：宿主未提供 RAGFlow 客户端（检查 knowledge.tenants / knowledge.datasetIds 配置与插件装配）',
     )
   }
   return ctx.knowledge
@@ -91,4 +91,21 @@ export async function runKnowledgeTool(
 export function truncate(text: string, max: number): string {
   const t = text.length > max ? `${text.slice(0, max)}…` : text
   return t
+}
+
+/**
+ * 截断并标注原文长度：截断发生时在尾部追加"（截断，原文共 N 字）"。
+ * 供 wiki 正文这类超长截断高发的字段——只给省略号时模型无从得知内容是部分的。
+ */
+export function truncateNoted(text: string, max: number): string {
+  if (text.length <= max) return text
+  return `${text.slice(0, max)}…（截断，原文共 ${text.length} 字）`
+}
+
+/** 列表截断展示：超 cap 时追加"（共 N 条，仅列前 M 条）"，模型据此知道清单是部分的。 */
+export function joinLimited(items: string[], cap: number): string {
+  const shown = items.slice(0, cap)
+  return items.length > cap
+    ? `${shown.join('、')}（共 ${items.length} 条，仅列前 ${shown.length} 条）`
+    : shown.join('、')
 }

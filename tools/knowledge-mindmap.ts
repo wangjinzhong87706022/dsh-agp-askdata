@@ -19,6 +19,13 @@ import type { MindmapNode } from '../src/clients/ragflow.ts'
 /** 单节点描述进入上下文的长度上限。 */
 const MAX_DESC_CHARS = 160
 
+/**
+ * 模型可见行数 = 节点预算（knowledge.maxGraphEntities，客户端 mindmap() 已按它
+ * 封顶），渲染层不再二次截断——声明服务端上限 1024，预算旋钮即截断旋钮，
+ * 避免"全量脑图只见前 20 行"的旋钮失真。
+ */
+const PREVIEW_LIMIT = 1024
+
 const FIELDS: ResultField[] = [
   { name: 'level', title: '层级', type: 'number' },
   { name: 'path', title: '分支路径', type: 'string' },
@@ -53,6 +60,7 @@ export const knowledgeMindmapTool: AskdataTool = {
     + '适合回答"应急响应分几级""险情有哪些类型""抢险物资有哪些"这类结构化分层问题；'
     + '与 knowledge_graph（实体关系网络）互补。',
   layer: 'base_business',
+  previewLimit: PREVIEW_LIMIT,
   inputSchema: {
     type: 'object',
     properties: {
@@ -68,12 +76,25 @@ export const knowledgeMindmapTool: AskdataTool = {
 
     return runKnowledgeTool(knowledgeMindmapTool, args, ctx, async () => {
       const client = requireKnowledge(ctx)
-      const forest = await client.mindmap({ keywords: keywords || undefined, signal: ctx.signal })
+      // 部分数据集失败在 apiOrSql 留痕（审计哈希链可见），不静默
+      let partialFailure = ''
+      const outcome = await client.mindmap({
+        keywords: keywords || undefined,
+        signal: ctx.signal,
+        onPartialFailure: (failed, total) => {
+          partialFailure = `（${failed}/${total} 数据集失败，结果可能不完整）`
+        },
+      })
+      // 预算截断/孤立节点同样留痕：缺层级会让模型对"分几级/有哪些分支"给出自信的错答案
+      const budgetNote = outcome.incomplete
+        ? `（仅展开 ${outcome.expandedNodes}/${outcome.totalNodes} 节点：受 knowledge.maxGraphEntities 预算或图连通性限制，深层分支可能有省略）`
+        : ''
       const apiUrl = `${ctx.config.knowledge.ragflowBaseUrl}/api/v1/datasets/{id}/artifacts/structure`
+      const call = `GET /artifacts/structure?kind=mindmap${keywords ? ` keywords="${truncate(keywords, 30)}"` : ''}`
 
-      if (forest.length === 0) {
+      if (outcome.forest.length === 0) {
         return {
-          apiOrSql: `GET /artifacts/structure?kind=mindmap${keywords ? ` keywords="${truncate(keywords, 30)}"` : ''} → 空`,
+          apiOrSql: `${call} → 空${partialFailure}${budgetNote}`,
           apiUrl,
           fields: FIELDS,
           data: [{
@@ -86,9 +107,9 @@ export const knowledgeMindmapTool: AskdataTool = {
         }
       }
 
-      const rows = flatten(forest)
+      const rows = flatten(outcome.forest)
       return {
-        apiOrSql: `GET /artifacts/structure?kind=mindmap${keywords ? ` keywords="${truncate(keywords, 30)}"` : ''} → ${rows.length} 节点`,
+        apiOrSql: `${call} → ${rows.length} 节点${partialFailure}${budgetNote}`,
         apiUrl,
         fields: FIELDS,
         data: rows,

@@ -12,7 +12,10 @@
  *   - 全部 GET/POST 检索类调用，无任何写操作（AGENTS.md 只读红线在知识面同样成立）。
  *   - 业务失败一律 HTTP 200 + `{"code": 非0}`，必须检查响应体 code（同 ragflow.ts 契约）。
  *   - API Key 只进 Authorization 头，不进日志、不进错误消息。
- *   - 取消与超时都能中断在途请求：调用方 signal 与本地超时经 AbortSignal.any 合并。
+ *   - 取消与超时都能中断在途请求：调用方 signal 与本地超时经 AbortSignal.any 合并；
+ *     超时（TimeoutError）与取消（AbortError）在错误消息中分流，不都报成英文 abort 原文。
+ *   - 多数据集方法语义：某个数据集失败不拖垮整体（该数据集贡献为空），全部失败才抛错；
+ *     部分失败经 `onPartialFailure(failed, total)` 回调暴露，由调用方决定是否进入审计面。
  * @module
  */
 
@@ -112,6 +115,26 @@ export interface MindmapNode {
   children: MindmapNode[]
 }
 
+/** mindmap() 结果：森林 + 预算可见性（截断不能静默——缺层级会让模型答错分支数）。 */
+export interface MindmapOutcome {
+  forest: MindmapNode[]
+  /** 预算截断前的实体（节点）总数。 */
+  totalNodes: number
+  /** 实际展开进入森林的节点数。 */
+  expandedNodes: number
+  /** 是否有实体未进入森林（节点预算封顶或图不连通）。 */
+  incomplete: boolean
+}
+
+/** 部分数据集失败时的可见性回调：failed = 失败数，total = 数据集总数；仅 failed>0 时回调。 */
+export type PartialFailureReporter = (failed: number, total: number) => void
+
+/** 原文检索附加选项（多数据集方法共用）。 */
+export interface PartialFailureOptions {
+  /** 部分数据集失败且整体仍返回时的回调（全失败走抛错路径，不回调）。 */
+  onPartialFailure?: PartialFailureReporter
+}
+
 export interface SearchChunksOptions {
   topK?: number
   /**
@@ -124,7 +147,33 @@ export interface SearchChunksOptions {
   fetchImpl?: typeof fetch
 }
 
-export interface SubgraphOptions {
+export interface GetPageOptions {
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+  onPartialFailure?: PartialFailureReporter
+}
+
+export interface StructureOptions {
+  keywords?: string
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+  onPartialFailure?: PartialFailureReporter
+}
+
+/**
+ * 知识面客户端公共接口：`RagflowClient`（单租户）与 `bindKnowledgeTenant`
+ * 返回的租户绑定视图都满足它。ToolContext 持有本接口——工具层不感知租户。
+ */
+export interface KnowledgeClient {
+  searchChunks(question: string, options?: SearchChunksOptions): Promise<KnowledgeSearchOutcome>
+  listPages(options?: ListPagesOptions): Promise<KnowledgePageItem[]>
+  getPage(slugOrKeywords: string, options?: GetPageOptions): Promise<KnowledgePage | null>
+  subgraph(options?: SubgraphOptions): Promise<KnowledgeSubgraph>
+  structure(kind: string, options?: StructureOptions): Promise<KnowledgeSubgraph>
+  mindmap(options?: StructureOptions): Promise<MindmapOutcome>
+}
+
+export interface SubgraphOptions extends PartialFailureOptions {
   /** 中心实体（wiki slug 或实体名）；提供时走 node 中心扩展。 */
   node?: string
   /** 概览种子关键词（node 未提供时生效）。 */
@@ -134,7 +183,7 @@ export interface SubgraphOptions {
   fetchImpl?: typeof fetch
 }
 
-export interface ListPagesOptions {
+export interface ListPagesOptions extends PartialFailureOptions {
   keywords?: string
   pageType?: string
   limit?: number
@@ -155,6 +204,9 @@ export class RagflowApiError extends Error {
 /** 服务端实体预算硬上限（artifacts/graph 的 top_n 钳位，与服务端一致）。 */
 const MAX_GRAPH_TOP_N = 1024
 
+/** structure 端点支持的 kind 枚举（线上 v0.27.x 实证）。 */
+const STRUCTURE_KINDS = new Set(['graph', 'mindmap', 'timeline', 'session_essence', 'session_graph'])
+
 function normalizeCode(code: unknown): unknown {
   if (typeof code === 'string' && /^\d+$/.test(code)) return Number(code)
   return code
@@ -174,19 +226,36 @@ function strArray(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string' && v.length > 0)
 }
 
+/**
+ * positions 净化为 5 元组 `[page, x0, x1, top, bottom]`（与 dsh-ragflow 的
+ * normalizePositions 同一契约）：page 必须 ≥1 且全坐标有限才保留，其余行丢弃——
+ * RAGFlow 常以 `[null, …]` 打头，Number(null)=0 的宽松转换会让 page=0 假页码存活。
+ */
 function positionsOf(raw: Record<string, unknown>): number[][] | null {
   if (!Array.isArray(raw.positions)) return null
-  const rows = raw.positions
-    .filter((p): p is unknown[] => Array.isArray(p))
-    .map((p) => p.map((n) => (typeof n === 'number' && Number.isFinite(n) ? n : Number(n))))
-    .filter((p) => p.every((n) => Number.isFinite(n)))
+  const rows: number[][] = []
+  for (const entry of raw.positions) {
+    if (!Array.isArray(entry) || entry.length < 5) continue
+    const [page, x0, x1, top, bottom] = entry as unknown[]
+    if (typeof page !== 'number' || !Number.isFinite(page) || page < 1) continue
+    if (![x0, x1, top, bottom].every((n) => typeof n === 'number' && Number.isFinite(n))) continue
+    rows.push([page, x0, x1, top, bottom] as number[])
+  }
   return rows.length > 0 ? rows : null
 }
+
+/**
+ * slug 形态：`<page_type>/<名称>`。page_type 只认小写字母开头的 ASCII 短词
+ * （entity/concept/topic/regulation…服务端可扩展），不再硬编码三值白名单——
+ * 新增页面类型不会被误判成关键词；page_type 至少 2 字符，`a/b` 这类单词斜杠
+ * 仍按关键词处理。
+ */
+const SLUG_RE = /^[a-z][a-z0-9_-]{1,31}\/\S+$/
 
 /** 实体名 → wiki slug（`<page_type>/<name>`）；已是 slug 形态原样返回。 */
 export function entitySlug(name: string): string {
   const trimmed = name.trim()
-  return /^(entity|concept|topic)\//.test(trimmed) ? trimmed : `entity/${trimmed}`
+  return SLUG_RE.test(trimmed) ? trimmed : `entity/${trimmed}`
 }
 
 /** wiki slug → 人类可读名（去掉 `<page_type>/` 前缀）。 */
@@ -196,15 +265,24 @@ export function slugName(slug: string): string {
 }
 
 /**
+ * RagflowClient 构造配置：KnowledgeConfig 的客户端子集（租户注册表/兜底属于
+ * 服务装配层，不进客户端）。完整 KnowledgeConfig 结构上天然满足本类型。
+ */
+export type RagflowClientConfig = Pick<
+  KnowledgeConfig,
+  'ragflowBaseUrl' | 'ragflowApiKey' | 'datasetIds' | 'timeoutMs' | 'maxChunks' | 'maxGraphEntities'
+>
+
+/**
  * RAGFlow 知识面客户端。
  *
  * 每个方法独立可测（`fetchImpl` 注入）；多数据集方法（search/subgraph/listPages）
  * 逐个数据集调用后按 slug/title 合并去重，某个数据集失败不拖垮整体
  * （该数据集贡献为空），全部失败才抛错。
  */
-export class RagflowClient {
+export class RagflowClient implements KnowledgeClient {
   constructor(
-    private readonly config: KnowledgeConfig,
+    private readonly config: RagflowClientConfig,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
@@ -229,10 +307,29 @@ export class RagflowClient {
     if (this.config.datasetIds.length === 0) {
       throw askdataError(
         'INVALID_PARAM',
-        '知识面未配置检索目标：请在插件配置 knowledge.datasetIds 填入 RAGFlow 数据集 id',
+        '知识面未配置检索目标：多租户请配置 knowledge.tenants[].datasetIds（每租户各自的数据集），'
+        + '遗留单租户请配置 knowledge.datasetIds',
       )
     }
     return this.config.datasetIds
+  }
+
+  /**
+   * 网络层异常收敛：AskdataError 直通；超时（TimeoutError）与取消（AbortError）
+   * 单独措辞（原样透出英文 "This operation was aborted" 会误导排障）；其余按
+   * BACKEND_DOWN 收敛为 AskdataError，不向调用方暴露堆栈。
+   */
+  private transportFailure(err: unknown, path: string): never {
+    if (err instanceof Error && err.name === 'AskdataError') throw err
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw askdataError(
+        'BACKEND_DOWN',
+        err.name === 'TimeoutError'
+          ? `RAGFlow 调用超时（knowledge.timeoutMs=${this.config.timeoutMs}ms，${path.split('?')[0]}）`
+          : `知识调用已被取消（${path.split('?')[0]}）`,
+      )
+    }
+    throw askdataError('BACKEND_DOWN', `无法访问 RAGFlow（${path.split('?')[0]}）：${String(err instanceof Error ? err.message : err).slice(0, 160)}`)
   }
 
   /** GET + JSON 解析 + code 检查；网络/HTTP/业务失败统一收敛为 AskdataError。 */
@@ -246,8 +343,7 @@ export class RagflowClient {
       }
       body = await res.json()
     } catch (err) {
-      if (err instanceof Error && err.name === 'AskdataError') throw err
-      throw askdataError('BACKEND_DOWN', `无法访问 RAGFlow（${path.split('?')[0]}）：${String(err instanceof Error ? err.message : err).slice(0, 160)}`)
+      this.transportFailure(err, path)
     }
     return this.checkEnvelope(body, path)
   }
@@ -268,8 +364,7 @@ export class RagflowClient {
       }
       body = await res.json()
     } catch (err) {
-      if (err instanceof Error && err.name === 'AskdataError') throw err
-      throw askdataError('BACKEND_DOWN', `无法访问 RAGFlow（${path.split('?')[0]}）：${String(err instanceof Error ? err.message : err).slice(0, 160)}`)
+      this.transportFailure(err, path)
     }
     return this.checkEnvelope(body, path)
   }
@@ -364,10 +459,27 @@ export class RagflowClient {
       }
     }
 
-    return { chunks: chunks.slice(0, topK), labels }
+    // 同文去重（对齐 dsh-ragflow dedupeByContent 契约）：同一文档多次入库会返回
+    // 同文异 id 的片段，既占 topK 预算又让引用重复计数；按归一化正文（空白折叠）
+    // 去重保首见——分块差异（解析/OCR 波动）不构成"不同证据"。
+    const seenText = new Set<string>()
+    const deduped: KnowledgeChunk[] = []
+    for (const c of chunks) {
+      const identity = c.content.replace(/\s+/gu, ' ')
+      if (seenText.has(identity)) continue
+      seenText.add(identity)
+      deduped.push(c)
+    }
+
+    return { chunks: deduped.slice(0, topK), labels }
   }
 
-  /** wiki 页面清单（keywords 命中 title/summary；多数据集合并）。 */
+  /**
+   * wiki 页面清单（keywords 命中 title/summary；多数据集合并）。
+   *
+   * 每个数据集都查询（各取 limit 条候选）后统一去重截断——不在前置数据集吃满
+   * limit 时提前返回，避免后置数据集被饿死（合并顺序仍按数据集配置顺序）。
+   */
   async listPages(options: ListPagesOptions = {}): Promise<KnowledgePageItem[]> {
     const datasetIds = this.requireDatasets()
     const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 20)))
@@ -402,23 +514,34 @@ export class RagflowClient {
           summary: str(row.summary),
           datasetId,
         })
-        if (items.length >= limit) return items
       }
     }
     if (items.length === 0 && failures.length === datasetIds.length) throw failures[0]
-    return items
+    if (failures.length > 0) options.onPartialFailure?.(failures.length, datasetIds.length)
+    return items.slice(0, limit)
   }
 
-  /** wiki 页面全文（按 slug 或关键词定位；slug 需带 `<page_type>/` 前缀）。 */
-  async getPage(slugOrKeywords: string, options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<KnowledgePage | null> {
+  /**
+   * wiki 页面全文（按 slug 或关键词定位；slug 需带 `<page_type>/` 前缀）。
+   *
+   * 失败语义与 listPages/subgraph 一致：逐数据集找第一个命中；某数据集失败
+   * （业务失败或网络失败）不拖垮整体；**全部数据集失败才抛首个错误**——业务
+   * 失败（如 API key 失效）不能吞成"页面不存在"，否则模型会带着用户反复换名重试。
+   * 部分失败且未找到时回调 onPartialFailure 后返回 null。
+   */
+  async getPage(
+    slugOrKeywords: string,
+    options: GetPageOptions = {},
+  ): Promise<KnowledgePage | null> {
     const datasetIds = this.requireDatasets()
     const trimmed = slugOrKeywords.trim()
     if (!trimmed) throw askdataError('INVALID_PARAM', 'slug 或关键词不能为空')
 
-    if (/^(entity|concept|topic)\//.test(trimmed)) {
+    if (SLUG_RE.test(trimmed)) {
       // slug 直取：拆 page_type/slug 逐数据集找第一个命中
       const [pageType, ...rest] = trimmed.split('/')
       const slug = rest.join('/')
+      const failures: unknown[] = []
       for (const datasetId of datasetIds) {
         try {
           const data = await this.getJson(
@@ -429,18 +552,25 @@ export class RagflowClient {
           const page = this.toPage(data, datasetId)
           if (page) return page
         } catch (err) {
-          if (err instanceof RagflowApiError) continue
-          throw err
+          failures.push(err)
         }
       }
+      if (failures.length === datasetIds.length) throw failures[0]!
+      if (failures.length > 0) options.onPartialFailure?.(failures.length, datasetIds.length)
       return null
     }
 
     // 关键词定位：清单取第一个标题/关键词最贴合的条目
-    const candidates = await this.listPages({ keywords: trimmed, limit: 5, signal: options.signal, fetchImpl: options.fetchImpl })
+    const candidates = await this.listPages({
+      keywords: trimmed,
+      limit: 5,
+      signal: options.signal,
+      fetchImpl: options.fetchImpl,
+      ...(options.onPartialFailure ? { onPartialFailure: options.onPartialFailure } : {}),
+    })
     const exact = candidates.find((c) => c.title === trimmed) ?? candidates[0]
     if (!exact) return null
-    return this.getPage(exact.slug, { signal: options.signal, fetchImpl: options.fetchImpl })
+    return this.getPage(exact.slug, { signal: options.signal, fetchImpl: options.fetchImpl, onPartialFailure: options.onPartialFailure })
   }
 
   private toPage(data: unknown, datasetId: string): KnowledgePage | null {
@@ -515,14 +645,16 @@ export class RagflowClient {
           const row = item as Record<string, unknown>
           const from = str(row.from) || str(row.source)
           const to = str(row.to) || str(row.target)
+          const predicate = str(row.predicate) || str(row.keywords) || str(row.type)
           if (!from || !to || from === to) continue
-          const key = `${from}\u0000${to}`
+          // 去重键含谓词：同一实体对的不同关系（如"任职于"与"管理"）各自成边，不互相吞并
+          const key = `${from}\u0000${to}\u0000${predicate}`
           if (relationKeys.has(key)) continue
           relationKeys.add(key)
           relations.push({
             from,
             to,
-            predicate: str(row.predicate) || str(row.keywords) || str(row.type),
+            predicate,
             weight: toNumber(row.weight) ?? 0,
             description: str(row.description),
             datasetId,
@@ -532,6 +664,7 @@ export class RagflowClient {
     }
 
     if (entityBySlug.size === 0 && failures.length === datasetIds.length) throw failures[0]
+    if (failures.length > 0) options.onPartialFailure?.(failures.length, datasetIds.length)
 
     // 关系两端实体必须可见（服务端 node 模式保证；概览模式过滤悬空边）
     const entities = [...entityBySlug.values()]
@@ -544,8 +677,17 @@ export class RagflowClient {
     }
   }
 
-  /** 数据集级结构图谱（kind: graph/mindmap/timeline/session_essence/session_graph）。 */
-  async structure(kind: string, options: { keywords?: string; signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<KnowledgeSubgraph> {
+  /**
+   * 数据集级结构图谱（kind: graph/mindmap/timeline/session_essence/session_graph）。
+   * kind 白名单在调用期校验（拼错直接 INVALID_PARAM，不发无效请求）。
+   */
+  async structure(
+    kind: string,
+    options: StructureOptions = {},
+  ): Promise<KnowledgeSubgraph> {
+    if (!STRUCTURE_KINDS.has(kind)) {
+      throw askdataError('INVALID_PARAM', `structure kind 非法：${kind}（允许：${[...STRUCTURE_KINDS].join(' / ')}）`)
+    }
     const datasetIds = this.requireDatasets()
     const entityBySlug = new Map<string, KnowledgeEntity>()
     const relationKeys = new Set<string>()
@@ -590,14 +732,16 @@ export class RagflowClient {
           const row = item as Record<string, unknown>
           const from = str(row.from) || str(row.source)
           const to = str(row.to) || str(row.target)
+          const predicate = str(row.predicate) || str(row.keywords) || str(row.type)
           if (!from || !to || from === to) continue
-          const key = `${from}\u0000${to}`
+          // 去重键含谓词：同一实体对的不同关系（如"任职于"与"管理"）各自成边，不互相吞并
+          const key = `${from}\u0000${to}\u0000${predicate}`
           if (relationKeys.has(key)) continue
           relationKeys.add(key)
           relations.push({
             from,
             to,
-            predicate: str(row.predicate) || str(row.keywords) || str(row.type),
+            predicate,
             weight: toNumber(row.weight) ?? 0,
             description: str(row.description),
             datasetId,
@@ -607,6 +751,7 @@ export class RagflowClient {
     }
 
     if (entityBySlug.size === 0 && failures.length === datasetIds.length) throw failures[0]
+    if (failures.length > 0) options.onPartialFailure?.(failures.length, datasetIds.length)
     const entities = [...entityBySlug.values()]
     const known = new Set(entities.map((e) => e.slug))
     return { entities, relations: relations.filter((r) => known.has(r.from) && known.has(r.to)) }
@@ -617,9 +762,13 @@ export class RagflowClient {
    *
    * 与 structure('mindmap') 的差别：把 entities+relations 组装成树——
    * central_topic 为根，无入边的节点为根（兜底），环/悬空边安全跳过。
-   * `keywords` 透传服务端做种子过滤。
+   * `keywords` 透传服务端做种子过滤；`onPartialFailure` 同 structure。
+   * 返回预算信息：预算截断/孤立节点导致的"未全部展开"必须让调用方可见，
+   * 否则模型可能对被截断的层级数给出自信的错答案。
    */
-  async mindmap(options: { keywords?: string; signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<MindmapNode[]> {
+  async mindmap(
+    options: StructureOptions = {},
+  ): Promise<MindmapOutcome> {
     const sub = await this.structure('mindmap', options)
     const cap = this.config.maxGraphEntities
     const byName = new Map(sub.entities.map((e) => [e.name, e]))
@@ -660,6 +809,50 @@ export class RagflowClient {
       const node = build(root, new Set())
       if (node) forest.push(node)
     }
-    return forest
+    const expandedNodes = cap - budget
+    return {
+      forest,
+      totalNodes: sub.entities.length,
+      expandedNodes,
+      incomplete: expandedNodes < sub.entities.length,
+    }
+  }
+}
+
+/**
+ * 把租户注册表绑定为一次工具调用的知识面视图（多租户方案 1 的路由点）。
+ *
+ * 租户选择发生在上下文创建期（`createContext({tenantId})` 捕获），工具层只看到
+ * KnowledgeClient 接口、不感知租户；解析失败在首次方法调用时 fail loud
+ * （AskdataError INVALID_PARAM，可用租户名列在消息里）——绝不静默落别的租户，
+ * 防跨租户误用。
+ */
+export function bindKnowledgeTenant(
+  clients: ReadonlyMap<string, RagflowClient>,
+  tenantId: string | undefined,
+  defaultTenant: string,
+): KnowledgeClient {
+  const pick = (): RagflowClient => {
+    const wanted = (tenantId ?? '').trim() || defaultTenant
+    const client = wanted !== '' ? clients.get(wanted) : undefined
+    if (client === undefined) {
+      throw askdataError(
+        'INVALID_PARAM',
+        `知识面租户未解析：tenantId=${tenantId || '（未提供）'}，defaultTenant=${defaultTenant || '（未配置）'}`
+        + `，可用租户：${[...clients.keys()].join('、') || '（无）'}。`
+        + '请配置 knowledge.defaultTenant 或在会话上下文携带 tenantId。',
+      )
+    }
+    return client
+  }
+  // 委托方法一律 async：租户解析的同步抛错转成 rejected promise，
+  // 调用方（工具层 catch 管线）按统一失败语义处理。
+  return {
+    searchChunks: async (question, options) => pick().searchChunks(question, options),
+    listPages: async (options) => pick().listPages(options),
+    getPage: async (slugOrKeywords, options) => pick().getPage(slugOrKeywords, options),
+    subgraph: async (options) => pick().subgraph(options),
+    structure: async (kind, options) => pick().structure(kind, options),
+    mindmap: async (options) => pick().mindmap(options),
   }
 }

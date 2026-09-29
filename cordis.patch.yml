@@ -36,9 +36,26 @@
           database: 'wisetao_meta'
         knowledge:
           ragflowBaseUrl: 'https://labragf.openagp.top:9080'
-          datasetIds:
-            - 'fda7a510a87c11f1998b3dc126099a8d'  # 规程与预案（graph/wiki 已编译，436 页）
-            - 'fdfee2e4a87c11f1998b3dc126099a8d'  # 洪水资料
+          # 多租户注册表（方案 1）：API key 即租户边界。key 为 lab 实例 DEV-ONLY 凭据
+          # （详见 AGENTS.md「RAGFlow 多租户凭据」）；生产部署必须轮换并改用环境变量
+          # RAGFLOW_API_KEY_<ID大写> 注入（配置里留空 key 即走环境变量回退）。
+          defaultTenant: 'tqp'
+          tenants:
+            - id: 'tqp'      # 桃曲坡（admin@ragflow.io）：规程预案/洪水资料，graph+wiki+mindmap 已编译
+              ragflowApiKey: 'ragflow-EFGXYcdQ1KSyNn39-dFAlYW4kVe1BPG_Lg4pasv-sRQ'
+              datasetIds:
+                - 'fda7a510a87c11f1998b3dc126099a8d'  # 规程与预案（graph/wiki 已编译，436 页）
+                - 'fdfee2e4a87c11f1998b3dc126099a8d'  # 洪水资料
+            - id: 'jhq'      # 泾惠渠（admin4@ragflow.io）：三处资料库
+              ragflowApiKey: 'ragflow-uOrnjzXTOWTYvzDwkiJorGD3hEciAB3-jo8ofWpSBu8'
+              datasetIds:
+                - '7a96e5eab69211f18f992bf5359454d9'  # 泾惠渠-计划处（5 文档）
+                - '7a92958ab69211f18f992bf5359454d9'  # 泾惠渠-工程建设处资料（21 文档）
+                - '7a8d7082b69211f18f992bf5359454d9'  # 泾惠渠-工程管理处（177 文档）
+            - id: 'zuhe'     # 组合标准（admin3@ragflow.io）：公式/图片/竖表/引用溯源演示（chat 123 测试案例）
+              ragflowApiKey: 'ragflow--twE5HXaVPAkXlzRcmGXNhWsTkgDL1mWW0rQvnEbZsE'
+              datasetIds:
+                - 'ec5591d4ac0d11f1b8ab3155a5f51bf7'  # 标准库（14 份 SL 标准 PDF）
         duty:
           project: '桃曲坡水库'
           outputDir: ''                            # 缺省 $DSH_HOME/outputs

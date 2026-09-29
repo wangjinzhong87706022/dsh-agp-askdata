@@ -25,12 +25,17 @@ function callBody(fetchImpl: unknown, n: number): Record<string, unknown> {
   return JSON.parse(String(calls[n]![1].body)) as Record<string, unknown>
 }
 
-/** 装配带 mock fetch 的知识面 ToolContext（审计开，收集审计行）。 */
-function knowledgeCtx(fetchImpl: typeof fetch, audits: AuditRow[] = []): ToolContext {
+/** 装配带 mock fetch 的知识面 ToolContext（审计开，收集审计行；overrides 直传 resolveConfig）。 */
+function knowledgeCtx(
+  fetchImpl: typeof fetch,
+  audits: AuditRow[] = [],
+  overrides: Partial<Parameters<typeof resolveConfig>[0]> = {},
+): ToolContext {
   const config = resolveConfig({
     connection: { host: 'fe', port: 9030, user: 'u', password: 'p', database: 'agp' },
     knowledge: { datasetIds: ['ds1'], ragflowBaseUrl: 'https://ragflow.example.com', ragflowApiKey: 'k' },
     audit: { enabled: true },
+    ...overrides,
   })
   const executor = { execute: async () => ({ columns: [], rows: [] }) }
   return {
@@ -44,13 +49,13 @@ function knowledgeCtx(fetchImpl: typeof fetch, audits: AuditRow[] = []): ToolCon
 }
 
 describe('knowledge_search', () => {
-  it('命中：证据行带出处/相关度/内容，审计落行带 apiUrl', async () => {
+  it('命中：证据行带出处/相关度/内容与溯源锚（documentId/positions），审计落行带 apiUrl', async () => {
     const audits: AuditRow[] = []
     const fetchImpl = vi.fn(async () => jsonResponse({
       code: 0,
       data: {
         chunks: [
-          { content_with_weight: '主汛期汛限水位为 786.8m。', document_id: 'd1', document_keyword: '调度规程', similarity: 0.93 },
+          { content_with_weight: '主汛期汛限水位为 786.8m。', document_id: 'd1', document_keyword: '调度规程', similarity: 0.93, positions: [[18, 108, 255, 221, 236]], image_id: 'img-abc123' },
           { content_with_weight: '防洪标准 100 年一遇。', document_id: 'd2', document_keyword: '预案', similarity: 0.81 },
         ],
       },
@@ -58,8 +63,13 @@ describe('knowledge_search', () => {
     const r = await knowledgeSearchTool.run({ query: '主汛期汛限水位是多少' }, knowledgeCtx(fetchImpl as never, audits))
     expect(r.success).toBe(true)
     expect(r.rowCount).toBe(2)
-    expect(r.data[0]).toMatchObject({ rank: 1, document: '调度规程', similarity: 0.93 })
+    expect(r.data[0]).toMatchObject({ rank: 1, document: '调度规程', documentId: 'd1', similarity: 0.93 })
     expect(String(r.data[0]!.content)).toContain('786.8m')
+    // 溯源锚原样透出：positions 为 JSON 数组（模型照抄进 citations 围栏），缺失整体省略
+    expect(r.data[0]!.positions).toEqual([[18, 108, 255, 221, 236]])
+    expect(r.data[0]!.imageId).toBe('img-abc123')
+    expect(r.data[1]).not.toHaveProperty('positions')
+    expect(r.data[1]).not.toHaveProperty('imageId')
     expect(audits).toHaveLength(1)
     expect(audits[0]!.apiUrl).toContain('/api/v1/datasets/search')
     expect(audits[0]!.sqlText).toContain('/datasets/search')
@@ -141,21 +151,28 @@ describe('knowledge_search', () => {
 })
 
 describe('knowledge_graph', () => {
-  it('node 模式：实体行 + 关联串，中心实体排第一', async () => {
+  it('node 模式：实体行 + 关联串带方向与谓词，中心实体排第一', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({
       code: 0,
       data: {
         entities: [
           { slug: 'entity/沮河', name: '沮河', description: '河流' },
           { slug: 'entity/桃曲坡水库', name: '桃曲坡水库', description: '中型水库，总库容 5720 万 m³' },
+          { slug: 'entity/水库管理局', name: '水库管理局', description: '管理机构' },
         ],
-        relations: [{ from: 'entity/桃曲坡水库', to: 'entity/沮河' }],
+        relations: [
+          { from: 'entity/桃曲坡水库', to: 'entity/沮河', predicate: '位于' },
+          { from: 'entity/水库管理局', to: 'entity/桃曲坡水库', predicate: '管理' },
+        ],
       },
     }))
     const r = await knowledgeGraphTool.run({ entity: '桃曲坡水库' }, knowledgeCtx(fetchImpl as never))
     expect(r.success).toBe(true)
-    expect(r.data[0]).toMatchObject({ entity: '桃曲坡水库', relations: '沮河' })
+    expect(r.data[0]).toMatchObject({ entity: '桃曲坡水库', relations: '→沮河(位于)、←水库管理局(管理)' })
     expect(String(r.data[0]!.description)).toContain('5720')
+    // 沮河行：入边来自中心实体，方向反向
+    const rowJu = r.data.find((row) => row.entity === '沮河')
+    expect(String(rowJu!.relations)).toBe('←桃曲坡水库(位于)')
   })
 
   it('entity 与 keywords 都缺 → INVALID_PARAM', async () => {
@@ -168,6 +185,36 @@ describe('knowledge_graph', () => {
     const r = await knowledgeGraphTool.run({ entity: '不存在的实体' }, knowledgeCtx(fetchImpl as never))
     expect(r.success).toBe(true)
     expect(String(r.data[0]!.description)).toContain('没有检索到相关实体')
+  })
+
+  it('部分数据集失败：apiOrSql 标注 N/M 数据集失败（审计可见）', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes('/ds1/')) {
+        return jsonResponse({ code: 0, data: { entities: [{ slug: 'entity/A', name: 'A', description: '' }], relations: [] } })
+      }
+      return jsonResponse({ code: 100, message: 'boom' })
+    })
+    const r = await knowledgeGraphTool.run(
+      { keywords: 'x' },
+      knowledgeCtx(fetchImpl as never, [], { knowledge: { datasetIds: ['ds1', 'ds2'] } }),
+    )
+    expect(r.success).toBe(true)
+    expect(r.apiOrSql).toContain('1/2 数据集失败')
+  })
+
+  it('单实体关联边超 30 条：截断并标注总数', async () => {
+    const entities = [
+      { slug: 'entity/A', name: 'A', description: '枢纽实体' },
+      ...Array.from({ length: 31 }, (_, i) => ({ slug: `entity/T${i}`, name: `T${i}`, description: '' })),
+    ]
+    const relations = Array.from({ length: 31 }, (_, i) => ({ from: 'entity/A', to: `entity/T${i}` }))
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { entities, relations } }))
+    const r = await knowledgeGraphTool.run({ entity: 'A' }, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(true)
+    const rowA = r.data.find((row) => row.entity === 'A')
+    expect(String(rowA!.relations)).not.toContain('T30')
+    expect(String(rowA!.relations)).toContain('共 31 条关联')
+    expect(String(rowA!.relations)).toContain('仅列前 30 条')
   })
 })
 
@@ -196,6 +243,43 @@ describe('knowledge_wiki_page', () => {
     const r = await knowledgeWikiPageTool.run({ slug: 'entity/不存在' }, knowledgeCtx(fetchImpl as never))
     expect(r.success).toBe(true)
     expect(String(r.data[0]!.summary)).toContain('没有该 wiki 页面')
+  })
+
+  it('全部数据集业务失败：工具返回失败（不冒充"页面不存在"）', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 100, message: 'Authentication failed' }))
+    const r = await knowledgeWikiPageTool.run({ slug: 'entity/桃曲坡水库' }, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(false)
+    expect(r.errorCode).toBe('BACKEND_DOWN')
+    expect(r.errorMessage).toContain('code=100')
+  })
+
+  it('正文超长截断带原文长度注记；出链超 30 条带计数', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      code: 0,
+      data: {
+        slug: 'entity/桃曲坡水库', title: '桃曲坡水库', page_type: 'entity', topic: 't', summary: 's',
+        content_md_rendered: '长'.repeat(5000),
+        outlinks: Array.from({ length: 35 }, (_, i) => `entity/L${i}`),
+        related_kb_pages: ['沮河'],
+      },
+    }))
+    const r = await knowledgeWikiPageTool.run({ slug: 'entity/桃曲坡水库' }, knowledgeCtx(fetchImpl as never))
+    expect(r.success).toBe(true)
+    const content = String(r.data[0]!.content)
+    expect(content).toContain('截断')
+    expect(content).toContain('共 5000 字')
+    expect(String(r.data[0]!.outlinks)).toContain('共 35 条')
+    expect(String(r.data[0]!.outlinks)).toContain('entity/L29')
+    expect(String(r.data[0]!.outlinks)).not.toContain('entity/L30、')
+  })
+})
+
+describe('知识工具 previewLimit 声明', () => {
+  it('预算旋钮即截断旋钮：知识工具自声明 previewLimit，不落 system.defaultPreviewLimit=20', () => {
+    expect(knowledgeSearchTool.previewLimit).toBe(51)
+    expect(knowledgeGraphTool.previewLimit).toBe(1024)
+    expect(knowledgeMindmapTool.previewLimit).toBe(1024)
+    expect(knowledgeWikiPageTool.previewLimit).toBe(5)
   })
 })
 
@@ -243,6 +327,18 @@ describe('knowledge_mindmap', () => {
     const r = await knowledgeMindmapTool.run({ keywords: '不存在' }, knowledgeCtx(fetchImpl as never))
     expect(r.success).toBe(true)
     expect(String(r.data[0]!.description)).toContain('knowledge_search')
+  })
+
+  it('节点预算截断：apiOrSql 注明仅展开 N/M 节点', async () => {
+    const entities = Array.from({ length: 10 }, (_, i) => ({ name: `N${i}`, type: 'sub_branch', description: '', mention_count: 1, aliases: [], source_chunk_ids: [] }))
+    const relations = entities.slice(0, -1).map((e, i) => ({ from: e.name, to: `N${i + 1}`, type: 'has_branch' }))
+    const fetchImpl = vi.fn(async () => jsonResponse({ code: 0, data: { kind: 'mindmap', templates: [{ entities, relations }] } }))
+    const r = await knowledgeMindmapTool.run(
+      {},
+      knowledgeCtx(fetchImpl as never, [], { knowledge: { datasetIds: ['ds1'], ragflowBaseUrl: 'https://ragflow.example.com', ragflowApiKey: 'k', maxGraphEntities: 4 } }),
+    )
+    expect(r.success).toBe(true)
+    expect(r.apiOrSql).toContain('仅展开 4/10 节点')
   })
 })
 

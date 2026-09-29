@@ -21,13 +21,23 @@ import type { KnowledgeLabels } from '../src/clients/ragflow.ts'
 /** 单条片段进入模型上下文的正文上限（防止长片段挤占上下文）。 */
 const MAX_CHUNK_CHARS = 800
 
+/**
+ * 模型可见行数上限 = 标签汇总行 1 + 片段行 topK（配置钳位 ≤50）= 51。
+ * 返回条数由 knowledge.maxChunks/top_k 控制，预览层不再二次截断，
+ * 避免"配 maxChunks=30 只见 20 条证据"的旋钮失真。
+ */
+const PREVIEW_LIMIT = 51
+
 const FIELDS: ResultField[] = [
   { name: 'rank', title: '序号', type: 'number' },
   { name: 'document', title: '出处文档', type: 'string' },
+  { name: 'documentId', title: '文档ID', type: 'string' },
   { name: 'similarity', title: '相关度', type: 'number' },
   { name: 'content', title: '证据片段', type: 'string' },
   { name: 'chunkId', title: '片段ID', type: 'string' },
   { name: 'pageNum', title: '页码', type: 'number' },
+  { name: 'positions', title: '页码坐标[page,x0,x1,top,bottom]', type: 'string' },
+  { name: 'imageId', title: '图片快照ID（公式/插图 chunk 才有）', type: 'string' },
 ]
 
 /** 标签分布 → 一行可读摘要（"2021-09×2、洪水资料×1"）。 */
@@ -44,8 +54,10 @@ export const knowledgeSearchTool: AskdataTool = {
     '在桃曲坡水利知识库（RAGFlow）中检索原文证据片段。输入完整中文问题，返回按相关度排序的片段及出处文档名/页码。'
     + '凡需要依据行业资料回答的问题（规程、预案、标准、洪水过程、工程参数口径），都必须先调用本工具取证；'
     + '结论只能来自返回片段并标注出处；检索不到时明确说明资料不足，不得编造。'
-    + '可按元数据收窄证据范围（如只查某场次洪水 flood_event=2021-09、只查表格类文档 doc_type=表格）。',
+    + '可按元数据收窄证据范围（如只查某场次洪水 flood_event=2021-09、只查表格类文档 doc_type=表格）。'
+    + '返回行的 documentId/chunkId/positions 是溯源锚：引用时逐字照抄进 citations 围栏（模板见 askdata-query-pattern skill），不要改写或用文件名冒充 documentId。',
   layer: 'base_business',
+  previewLimit: PREVIEW_LIMIT,
   inputSchema: {
     type: 'object',
     properties: {
@@ -92,6 +104,7 @@ export const knowledgeSearchTool: AskdataTool = {
           data: [{
             rank: 0,
             document: '',
+            documentId: '',
             similarity: 0,
             content: metaFilter
               ? '该元数据过滤条件下没有检索到证据片段。请放宽或去掉 meta_filter 重试；若仍为空，在结论中明确说明「现有资料无法支撑该问题」。'
@@ -109,6 +122,7 @@ export const knowledgeSearchTool: AskdataTool = {
         data.push({
           rank: 0,
           document: '（命中标签）',
+          documentId: '',
           similarity: 0,
           content: `命中片段的标签分布：${labelText}（来自标签库软重排，可作为引用分类标注）`,
           chunkId: '',
@@ -119,10 +133,15 @@ export const knowledgeSearchTool: AskdataTool = {
         data.push({
           rank: index + 1,
           document: chunk.documentName || chunk.documentId || '未知文档',
+          documentId: chunk.documentId,
           similarity: chunk.similarity === null ? 0 : Number(chunk.similarity.toFixed(4)),
           content: truncate(chunk.content, MAX_CHUNK_CHARS),
           chunkId: chunk.chunkId ?? '',
           pageNum: chunk.pageNum ?? 0,
+          // 溯源锚原样透出（JSON 数组，模型照抄进 citations 围栏；缺失整体省略）
+          ...(chunk.positions ? { positions: chunk.positions } : {}),
+          // 图片快照 id：公式/插图 chunk 才有，genui 据此嵌 /api/ragflow/images/<id>（缺失省略）
+          ...(chunk.imageId ? { imageId: chunk.imageId } : {}),
         })
       }
       return { apiOrSql, apiUrl, fields: FIELDS, data }

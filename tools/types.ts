@@ -9,7 +9,7 @@
 
 import type { AskdataConfig } from '../src/config.ts'
 import type { QueryOutput } from '../src/clients/starrocks.ts'
-import type { RagflowClient } from '../src/clients/ragflow.ts'
+import type { KnowledgeClient } from '../src/clients/ragflow.ts'
 import type { ResultField, ToolResult } from '../src/result.ts'
 import { fail, ok } from '../src/result.ts'
 import { assertSafeToExecute } from '../src/sql/whitelist.ts'
@@ -31,10 +31,13 @@ export interface ToolContext {
   /** MySQL 执行器（P1 元数据/告警工具用）。 */
   mysqlExecutor: SqlExecutor
   /**
-   * RAGFlow 知识面客户端（knowledge_search / knowledge_graph / knowledge_wiki_page 用）。
+   * RAGFlow 知识面客户端（knowledge_* 四工具 / resolve_tag / 值班报告取证用）。
+   * 多租户形态下是租户绑定视图（createContext 按 tenantId 选定，工具层无感知）；
    * 未装配（知识面关闭）时为 undefined，工具调用期给出明确提示。
    */
-  knowledge?: RagflowClient
+  knowledge?: KnowledgeClient
+  /** 本次调用归属的知识面租户 id（多租户；随审计 apiParams 落行）。 */
+  tenantId?: string
   /**
    * AGP API 调用通道（值班报告面 fetchAgpRealtime 用）；缺省全局 fetch。
    * 测试/宿主可注入替身（与 RagflowClient 的 fetchImpl 注入同一模式）。
@@ -168,7 +171,8 @@ export function applyAudit(
       question: JSON.stringify(args),
       sqlText: sql,
       ...(apiUrl !== undefined ? { apiUrl } : {}),
-      apiParams: args,
+      // 租户标记随审计参数落行（不改 WT_QUERY_AUDIT 列契约；单租户/未解析时不落）
+      apiParams: ctx.tenantId ? { ...args, _tenant: ctx.tenantId } : args,
       rowCount: result.rowCount,
       executionMs: Date.now() - started,
       errorCode: result.errorCode || undefined,
