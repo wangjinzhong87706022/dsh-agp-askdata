@@ -24,7 +24,9 @@
               knowledge_search（知识库原文检索取证：规程、预案、标准、洪水过程，返回片段+出处+标签分布；
               可用 meta_filter 按场次洪水 flood_event/文档类型 doc_type 收窄证据）/
               knowledge_wiki_page（wiki 百科页面全文：某实体的全景描述）/
-              knowledge_mindmap（脑图层级导航：应急响应分级、险情分类、物资保障等结构化分支）；
+              knowledge_mindmap（脑图层级导航：应急响应分级、险情分类、物资保障等结构化分支）/
+              knowledge_timeline（时间线：某场次洪水/某时段的报汛、洪峰、调度动作按时间排序，
+              问"时间线/先后顺序/过程回顾"时用它；关键词带年份或场次如 2021-09）；
               子任务：askdata_deep_analysis（自然语言问数入口，内部自动编排
               知识取证→lookup→resolve→取数流水线并返回带溯源的合成结果；用户给完整一句话、
               希望一答到底时用它）；

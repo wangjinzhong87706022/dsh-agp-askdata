@@ -31,6 +31,7 @@ import { knowledgeSearchTool } from './knowledge-search.ts'
 import { knowledgeGraphTool } from './knowledge-graph.ts'
 import { knowledgeWikiPageTool } from './knowledge-wiki-page.ts'
 import { knowledgeMindmapTool } from './knowledge-mindmap.ts'
+import { knowledgeTimelineTool } from './knowledge-timeline.ts'
 import { dutyReportTool } from './duty-report.ts'
 import { dutyStationsTool } from './duty-stations.ts'
 import { modelRelationGraphTool } from './model-relation-graph.ts'
@@ -77,6 +78,7 @@ export const knowledgeTools: AskdataTool[] = [
   knowledgeSearchTool,
   knowledgeWikiPageTool,
   knowledgeMindmapTool,
+  knowledgeTimelineTool,
 ]
 
 /**
@@ -132,6 +134,7 @@ export {
   knowledgeGraphTool,
   knowledgeWikiPageTool,
   knowledgeMindmapTool,
+  knowledgeTimelineTool,
   dutyReportTool,
   dutyStationsTool,
   modelRelationGraphTool,

@@ -16,7 +16,29 @@ import type { ToolContext } from './types.ts'
 import type { ResultField } from '../src/result.ts'
 import { requireKnowledge, runKnowledgeTool, truncate } from './knowledge-common.ts'
 import { askdataError } from '../src/errors.ts'
-import type { KnowledgeLabels } from '../src/clients/ragflow.ts'
+import type { KnowledgeChunk, KnowledgeLabels } from '../src/clients/ragflow.ts'
+
+/** 知识面检索的 chunk→document 反查映射共享（可选协作，零硬耦合）。
+ *
+ * 宿主同装 dsh-ragflow 时，其 ragflow-documents 行维护 chunkId→documentId Map
+ * 供 by-chunk 原文反查——但该 Map 只由 dsh-ragflow 自家检索填充。本钩子在每次
+ * knowledge_search 后把结果同步进去，使 citations 的 chunkId 句柄（模型照抄
+ * 最可靠的一列）也能打开原文；未装 dsh-ragflow 时静默跳过（documentId 直取
+ * 路径不受影响）。动态 import：未解析在运行时 reject，被 catch 吞掉。 */
+async function shareChunkDocuments(chunks: KnowledgeChunk[]): Promise<void> {
+  try {
+    const mod = (await import('@deepseek-ai/dsh-ragflow/document')) as {
+      registerChunkDocuments: (chunks: Array<{ chunkId?: string; documentId?: string }>) => void
+    }
+    mod.registerChunkDocuments(
+      chunks
+        .filter(c => c.chunkId && c.documentId)
+        .map(c => ({ chunkId: c.chunkId, documentId: c.documentId })),
+    )
+  } catch {
+    // 未安装 dsh-ragflow（独立部署形态）：跳过，documentId 直取路径仍有效。
+  }
+}
 
 /** 单条片段进入模型上下文的正文上限（防止长片段挤占上下文）。 */
 const MAX_CHUNK_CHARS = 800
@@ -91,6 +113,7 @@ export const knowledgeSearchTool: AskdataTool = {
     return runKnowledgeTool(knowledgeSearchTool, args, ctx, async () => {
       const client = requireKnowledge(ctx)
       const { chunks, labels } = await client.searchChunks(query, { topK, metaFilter, signal: ctx.signal })
+      shareChunkDocuments(chunks)
       const apiUrl = `${ctx.config.knowledge.ragflowBaseUrl}/api/v1/datasets/search`
       const filterNote = metaFilter ? ` meta=${truncate(JSON.stringify(metaFilter), 60)}` : ''
       const apiOrSql = `POST /datasets/search question="${truncate(query, 60)}" top_k=${topK}${filterNote} → ${chunks.length} 段`

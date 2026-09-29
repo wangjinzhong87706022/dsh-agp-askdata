@@ -6,15 +6,17 @@
 >
 > 范围：工具行为 + 证据正确性 + 模型转述纪律（出处标注、不编造、截断透明）。
 
-## 1. 锚点快照（2026-09-28 实测）
+## 1. 锚点快照（2026-09-29 实测刷新）
 
 | 维度 | 实测值 | 说明 |
 |---|---|---|
-| 数据集 | `fda7a510…`（规程与预案）+ `fdfee2e4…`（洪水资料） | 同 cordis.patch.yml 的 knowledge.datasetIds |
+| 数据集 | `fda7a510…`（规程与预案）+ `fdfee2e4…`（洪水资料） | tenants.tqp 的 datasetIds |
 | structure(graph) | 259 实体 / 351 关系 | 类型分布 org=90 / location=55 / product=40 / person=37 / regulation=28 / other=9 |
-| subgraph(node=桃曲坡水库) | 30 实体 / 29 关系（top_n=30） | 中心实体权重 101；**关系谓词全为空**（wiki-graph 端点特性） |
+| subgraph(node=桃曲坡水库) | 30 实体 / 29 关系（top_n=30） | 中心权重 101；**谓词全空**（wiki-graph 端点特性，关联串只有方向箭头） |
 | wiki 页面 | `entity/桃曲坡水库` 正文 10793 字 / 出链 101 条 | 清单含机构、人员（秦鹏/杨一波/党焕宁/田荣/刘根战）、联防指挥部等页 |
-| mindmap | 44 节点全展开（incomplete=false），9 个主分支 | 中心主题「桃曲坡水库防洪抢险应急预案」 |
+| mindmap | 44 节点全展开（incomplete=false），1 个中心主题 9 主分支 | 「桃曲坡水库防洪抢险应急预案」；只在规程库编译 |
+| **structure(timeline)** | **413 实体 / 274 关系（全 `ordered`）——仅在洪水资料库** | 实体 type=timestamp，name=时间串（粒度混杂：`1983`/`2021-10-05`/`2013-07-22 13:30`），description=事件摘要（报汛流量/库水位/洪峰等）；keywords 过滤可用（`2021`→4 实体/3 关系）；**含抽取噪声**（非时间名混入，如"红星水库溢洪道…受损"） |
+| structure(session_essence / session_graph) | 两库均空 | 未编译，无评测面 |
 
 **结构性锚点优先于计数锚点**：服务端重编译会改变实体/关系/节点数量（历史值
 341→351 关系即漂移过），断言应优先用稳定结构（中心主题名、分支名、黄金文档名、
@@ -24,9 +26,9 @@
 
 | 层级 | 命令 | 覆盖 |
 |---|---|---|
-| 单测回归（离线，mock） | `pnpm vitest run tests/ragflow-client.spec.ts tests/knowledge-tools.spec.ts` | 契约、失败语义、截断标注、去重（F 组） |
-| 直连探针（真实实例，只读） | `RAGFLOW_API_KEY=… pnpm tsx scripts/knowledge-eval-probe.ts` | 刷新本文档锚点快照 |
-| E2E（DSH web 全链路） | `E:\dsh\home-e2e\start-web-e2e.ps1` + `E:\git\deepseek-harness\apps\web\tests\e2e-knowledge-fusion.mjs` | 模型选路、工具调用可见性、dsh-ui 渲染 |
+| 单测回归（离线，mock） | `pnpm vitest run tests/ragflow-client.spec.ts tests/knowledge-tools.spec.ts tests/knowledge-tenants.spec.ts` | 契约、失败语义、截断标注、去重、租户路由（F 组） |
+| 直连探针（真实实例，只读） | `RAGFLOW_API_KEY=<tqp key> pnpm tsx scripts/knowledge-eval-probe.ts tqp` | 刷新本文档锚点快照（timeline/session 需按 §1 的 API 手工补测） |
+| E2E（DSH web 全链路） | home-e2e web + 浏览器自动化（tqp 为 defaultTenant） | 模型选路、工具调用可见性、dsh-ui 渲染 |
 
 ## 3. 用例集
 
@@ -82,6 +84,25 @@
 | E4 | 选路纪律 | 结构化分层问题（分几级/有哪些类型）应走 mindmap 而非 search 撞运气 | A3 问句在模型层应改道 knowledge_mindmap（skill 手册已指引） |
 | E5 | 引用溯源闭环（citations 围栏） | knowledge_search 取证 → 模型按 askdata-query-pattern skill §4 模板输出 citations 围栏（n/doc/page/quote/chunkId/documentId/positions 照抄工具行）→ genui 依据卡渲染 | 围栏解析成功（无降级代码块告警）；`[[N]]` 角标可弹 popover；条目带 documentId 时「打开原文」经 `/api/ragflow/documents/:id` 出 PDF（documentId 直取链路，不依赖 by-chunk 会话映射）；positions 跳页正确 |
 
+### T. timeline 时间线（knowledge_timeline 已实现——工具/编排器/单测齐备；直答选路率待积累）
+
+> 2026-09-29 实现：`RagflowClient.timeline()`（时间归一排序+undated 剔除）+
+> `knowledge_timeline` 工具（keywords 过滤+预算封顶标注+previewLimit 1024）+
+> deep_analysis 编排器 timelineHit 路由 + persona/skill 选路句。单测 4 例全过。
+> **直答 E2E（tqp）**：模型未选 knowledge_timeline，用 8 步 search 手工拼出
+> 顺序正确的时间线表（9-25 22:30 低洞加压 → 9-25 23:30 柳林洪峰 217 m³/s →
+> 9-26 02:00 入库 267 m³/s → 9-27 收尾）——内容可用但未走结构化轴；选路率
+> 与 ②③ 同一观察，缓解同源（deep_analysis 编排器已修，直答靠 persona 积累）。
+
+| # | 问句 / 参数 | 黄金要点 | 通过断言 |
+|---|---|---|---|
+| T1 | keywords="2021-09"（问"2021年9月那场洪水的时间线"） | 命中 2021-09 时段 timestamp 实体（探针：`2021`→4 实体/3 关系；`2021-09` 更收敛） | 按时间排序的事件表（时间/事件摘要/出处 chunk）；时间不乱序 |
+| T2 | keywords="2021-10" | 2021-10 场次（与 2021-09 同年相邻场次） | 与 T1 结果不混淆（场次隔离） |
+| T3 | 留空（全量概览） | 413 实体受 maxGraphEntities 预算封顶 + truncated 标注 | apiOrSql 出现「仅展开 N/413…」；模型声明时间线被截断 |
+| T4 | 数据质量 | name 含非时间噪声（如"红星水库溢洪道…受损"） | 工具层归一：可解析时间排序；不可解析的归入"未定时"附注（granularity=未定时），不混入时间轴 |
+| T5 | 粒度混杂 | name 粒度从 `1983`（年）到 `2013-07-22 13:30`（分钟） | 排序按可解析时间值（粗粒度不拆不编）；展示保留原始 name |
+| T6 | 编排器路由（deep_analysis） | 问句含"时间线/时间顺序"→ timelineHit → 只调 knowledge_timeline | 单测覆盖；直答场景模型自选工具不经过 classify |
+
 ### F. 失败语义与回归（离线单测已覆盖，列此供 E2E 对照）
 
 | # | 场景 | 期望行为 | 对应用例 |
@@ -94,6 +115,21 @@
 | F6 | mindmap 节点预算截断 | apiOrSql 注明「仅展开 N/M 节点」 | knowledge-tools.spec「节点预算截断」 |
 
 ## 4. 评分标准
+
+### 4.1 E2E 实测记录（2026-09-29，tqp 租户，五场景）
+
+| 场景 | 结果 | 现场证据 |
+|---|---|---|
+| ① 图谱（B1） | **通过** | knowledge_graph 被调用；实体清单带类型与说明（铜川市/柳林水文站/沮河/溢洪道闸门…），并对输水工程/通讯成员单位做了准确归类注解 |
+| ② wiki（C2） | **内容通过 / 选路偏差** | 灌溉中心全景正确（事业单位/防汛/灌溉/运行管理），但模型走 search+graph 组合，knowledge_wiki_page 未被选路 |
+| ③ mindmap（D2） | **内容通过 / 选路偏差** | 应急响应 4 级（Ⅰ/Ⅱ/Ⅲ/Ⅳ）+ 启动主体 + 最高级说明全中，但走 knowledge_search 而非 knowledge_mindmap |
+| ④ 溯源（E5） | **链路通过 / 模型 id 保真失手** | 786.80 命中 + 引用卡 + 打开原文；模型围栏里 documentId 失真（且文件名被改写为"03-水利枢纽汛期整体调度运用计划.pdf"）→ 404 错误面板（诚实报错）；用真实 id（ac25bcaa…）直打代理 200/PDF 1.4MB——机械链路完好 |
+| ⑤ timeline（T1） | **缺口行为实证** | 无 knowledge_timeline 可调；模型用多轮 search 手工拼时间线（7 步/179K tok，产出 2021-09-15~28 时序并自行处理年份标签矛盾）——内容可用但成本高出一个量级，且时序结构（ordered 边）完全未利用 |
+
+**两条横向发现**：(a) 自由问答下 Deepseek-v4-flash 明显偏爱 knowledge_search，
+wiki/mindmap 专用工具选路率低（结构化价值未被利用；缓解候选：deep_analysis
+编排器加规则、或接受 search-first——内容正确性未丢）；(b) documentId 保真
+在 tqp 复现（zuhe 曾见 32 位变造 id）——治理候选仍是 T 组旁登记的三方案。
 
 - **P0（必须全过，任一失败即该用例不通过）**：黄金数值/结构正确；出处文档名正确；无编造（检索为空时明说资料不足）。
 - **P1（质量分）**：标签/元数据标注、层级路径形态、方向箭头语义、次汛期等旁证信息完整性。

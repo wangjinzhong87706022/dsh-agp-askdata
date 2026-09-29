@@ -155,6 +155,7 @@ Y = 年聚合（1Y 走 WT_CUBE）
 | "X 类设备型号清单" | lookup_model(app_id 过滤) |
 | "汛限水位/防洪标准是多少，依据是什么" | knowledge_search 取证 → 需要数值再走取数面 |
 | "某工程/机构和哪些对象相关" | knowledge_graph(entity=名称) 展开一跳关系 |
+| "某场洪水的时间线/过程回顾" | knowledge_timeline(keywords=场次或年份) 按时间排序的事件轴 |
 | "某实体的完整背景" | knowledge_wiki_page(slug 或关键词) 取百科页面 |
 | "响应分几级/险情有哪些类型" | knowledge_mindmap(关键词) 取脑图层级 |
 | "2021-09 场次洪水的降雨量" | knowledge_search(meta_filter: flood_event=2021-09) 限定场次取证 |

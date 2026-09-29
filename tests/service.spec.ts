@@ -15,7 +15,7 @@ function service() {
 }
 
 describe('服务装配', () => {
-  it('暴露全部 24 个工具（P0 五 + P1 六 + subagent 一 + 值班报告二 + meta 六 + 知识面四）', () => {
+  it('暴露全部 25 个工具（P0 五 + P1 六 + subagent 一 + 值班报告二 + meta 六 + 知识面五）', () => {
     expect(service().tools.map((t) => t.name)).toEqual([
       'lookup_tag',
       'estimate_count',
@@ -41,6 +41,7 @@ describe('服务装配', () => {
       'knowledge_search',
       'knowledge_wiki_page',
       'knowledge_mindmap',
+      'knowledge_timeline',
     ])
   })
 

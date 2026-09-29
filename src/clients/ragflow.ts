@@ -171,6 +171,7 @@ export interface KnowledgeClient {
   subgraph(options?: SubgraphOptions): Promise<KnowledgeSubgraph>
   structure(kind: string, options?: StructureOptions): Promise<KnowledgeSubgraph>
   mindmap(options?: StructureOptions): Promise<MindmapOutcome>
+  timeline(options?: StructureOptions): Promise<TimelineOutcome>
 }
 
 export interface SubgraphOptions extends PartialFailureOptions {
@@ -817,6 +818,85 @@ export class RagflowClient implements KnowledgeClient {
       incomplete: expandedNodes < sub.entities.length,
     }
   }
+
+  /**
+   * 时间线（timeline 编译产物，timestamp 实体 + ordered 时序边）。
+   *
+   * 时间归一（parseTimelineName）：支持 年/年月/年月日/年月日时分[秒]，月日+时刻
+   * （无年份，单独归组）；其余按噪声剔除进 undated。events 按可解析时间升序，
+   * undated 附后不混轴（T4/T5 用例口径，spec: docs/knowledge-eval-cases.md T 组）。
+   */
+  async timeline(options: StructureOptions = {}): Promise<TimelineOutcome> {
+    const sub = await this.structure('timeline', options)
+    const cap = this.config.maxGraphEntities
+    const events: TimelineEvent[] = []
+    const undated: TimelineEvent[] = []
+    for (const entity of sub.entities) {
+      const parsed = parseTimelineName(entity.name)
+      const event: TimelineEvent = {
+        time: entity.name,
+        event: entity.description,
+        granularity: parsed.granularity,
+        instant: parsed.instant,
+        sourceChunks: entity.sourceChunkIds.length,
+      }
+      if (parsed.instant === null) undated.push(event)
+      else events.push(event)
+    }
+    events.sort((a, b) => (a.instant ?? 0) - (b.instant ?? 0))
+    const truncated = events.length + undated.length > cap
+    return { events: events.slice(0, cap), undated: undated.slice(0, cap), total: sub.entities.length, truncated }
+  }
+}
+
+/** 时间线事件：timestamp 实体的归一形态。 */
+export interface TimelineEvent {
+  /** 原始时间名（保持服务端口径，不拆不编）。 */
+  time: string
+  /** 事件摘要（实体 description，报汛/洪峰/调度动作等）。 */
+  event: string
+  /** 时间粒度（由 name 形态推断）。 */
+  granularity: 'year' | 'month' | 'date' | 'datetime' | 'unknown'
+  /** 归一化时间戳（ms）；unknown 粒度为 null。 */
+  instant: number | null
+  /** 来源 chunk 数（溯源粗粒度）。 */
+  sourceChunks: number
+}
+
+/** timeline() 结果：排序事件 + 未定时事件 + 预算可见性。 */
+export interface TimelineOutcome {
+  /** 可解析时间的事件，升序。 */
+  events: TimelineEvent[]
+  /** 无法解析为时间的实体（抽取噪声/缺年份），不混入时间轴。 */
+  undated: TimelineEvent[]
+  /** 预算截断前的实体总数。 */
+  total: number
+  truncated: boolean
+}
+
+/**
+ * 时间名归一（探针实测形态：`1983`、`2020-08`、`2021-10-05`、
+ * `2013-07-22 13:30`、`09-08 14:00:00`（无年份，单独归组）+ 抽取噪声）。
+ */
+export function parseTimelineName(name: string): { instant: number | null; granularity: TimelineEvent['granularity'] } {
+  const t = name.trim()
+  let m = /^(\d{4})$/.exec(t)
+  if (m) return { instant: Date.UTC(Number(m[1]), 0, 1), granularity: 'year' }
+  m = /^(\d{4})-(\d{2})$/.exec(t)
+  if (m) return { instant: Date.UTC(Number(m[1]), Number(m[2]) - 1, 1), granularity: 'month' }
+  m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(t)
+  if (m) {
+    return {
+      instant: Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0)),
+      granularity: m[4] !== undefined ? 'datetime' : 'date',
+    }
+  }
+  m = /^(\d{2})-(\d{2}) (\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(t)
+  if (m) {
+    // 月日+时刻但无年份：跨年歧义，不做绝对排序（instant=null），粒度仍可展示。
+    return { instant: null, granularity: 'unknown' }
+  }
+  return { instant: null, granularity: 'unknown' }
 }
 
 /**
@@ -854,5 +934,6 @@ export function bindKnowledgeTenant(
     subgraph: async (options) => pick().subgraph(options),
     structure: async (kind, options) => pick().structure(kind, options),
     mindmap: async (options) => pick().mindmap(options),
+    timeline: async (options) => pick().timeline(options),
   }
 }

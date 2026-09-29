@@ -20,7 +20,7 @@ describe('配置页默认值可装配', () => {
   it('schema 默认值经 toRuntimeConfig → createAskdataService 全程通过', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
     // P0 五 + P1 六 + subagent 一 + 知识面四 + 值班报告二 + meta 六 = 24
-    expect(service.tools).toHaveLength(24)
+    expect(service.tools).toHaveLength(25)
     expect(service.config.query.aggregateTable).toBe('WT_CUBE')
     expect(service.config.query.cubeTypeMap[7]).toBe(DEFAULT_CUBE_TYPE_MAP[7])
     expect(service.config.query.granularityMap['1D']).toBe(2)
@@ -221,20 +221,20 @@ describe('工具组开关（toolsets）', () => {
 
   it('默认全开：24 个工具（现状兼容）', () => {
     const service = createAskdataService(toRuntimeConfig(defaultConfig()))
-    expect(service.tools).toHaveLength(24)
+    expect(service.tools).toHaveLength(25)
     expect(service.tools.map((t) => t.name)).toContain('lookup_tag')
     expect(service.tools.map((t) => t.name)).toContain('model_relation_graph')
     expect(service.tools.map((t) => t.name)).toContain('model_field_list')
     expect(service.tools.map((t) => t.name)).toContain('query_model')
   })
 
-  it('云端 API 形态（sql=false）：仅 API 面 + 知识面 12 个，无任何 SQL 工具', () => {
+  it('云端 API 形态（sql=false）：仅 API 面 + 知识面 13 个，无任何 SQL 工具', () => {
     const service = createAskdataService({
       connection: conn,
       toolsets: { sql: false, api: true, knowledge: true },
     })
     const names = service.tools.map((t) => t.name)
-    expect(names).toHaveLength(12)
+    expect(names).toHaveLength(13)
     expect(names).toEqual(expect.arrayContaining([
       'generate_duty_report', 'list_duty_stations', 'model_relation_graph', 'model_field_list',
       'relation_field_list', 'query_model', 'query_model_segment', 'query_relation_segment',
@@ -251,7 +251,7 @@ describe('工具组开关（toolsets）', () => {
       toolsets: { sql: true, api: false, knowledge: false },
     })
     const names = service.tools.map((t) => t.name)
-    expect(names).toHaveLength(12) // P0 五 + P1 六 + deep_analysis
+    expect(names).toHaveLength(12) // P0 五 + P1 六 + deep_analysis（timeline 属知识面，不含） // P0 五 + P1 六 + deep_analysis
     expect(names).not.toContain('model_relation_graph')
     expect(names).not.toContain('knowledge_search')
   })
