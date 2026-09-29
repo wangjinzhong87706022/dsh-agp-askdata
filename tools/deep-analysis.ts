@@ -93,7 +93,7 @@ async function runStep(
  *
  * `knowledgeAvailable=false` 时（知识面未装配）知识分支整体关闭，问句按原有
  * 取数面规则分类——融合是增强不是依赖。 */
-function classify(question: string, knowledgeAvailable = true): {
+export function classify(question: string, knowledgeAvailable = true): {
   tools: AskdataTool[]
   baseArgs: () => Record<string, unknown>
   needDevice: boolean
@@ -117,46 +117,66 @@ function classify(question: string, knowledgeAvailable = true): {
     knowledgeFirst,
   })
 
-  if (knowledgeOnly) {
-    // 时序结构问题优先 timeline（服务端 timeline 产物 = ordered 事件轴，search
-    // 手工拼时间线成本高一个量级——2026-09-29 E2E 实测）。
-    if (/时间线|时间轴|时间顺序|先后顺序|事件经过|过程回顾|时间节点/.test(q)) {
-      const kw = /(\d{4})\s*年\s*(\d{1,2})\s*月/.exec(q)
-      const kw2 = /(\d{4})[-年](\d{1,2})/.exec(q)
-      const keywords = kw ? `${kw[1]}-${String(kw[2]).padStart(2, '0')}` : (kw2 ? `${kw2[1]}-${kw2[2]}` : (q.match(/(\d{4})/)?.[1] ?? ''))
-      return route({
-        tools: [knowledgeTimelineTool],
-        baseArgs: () => (keywords ? { keywords } : {}),
-        needDevice: false,
-        needTag: false,
-        defaultRangeDays: 0,
-      })
-    }
-    // 层级/分类/分级问题优先 mindmap（44 节点的结构化分支轴，search 只能给片段）。
-    if (/分几级|几级响应|分为哪几|哪些类型|有哪些分类|什么级别|响应级别/.test(q)) {
-      const branch = /(应急预案|应急响应|险情|物资保障|应急保障|后期处置)/.exec(q)?.[1] ?? ''
-      return route({
-        tools: [knowledgeMindmapTool],
-        baseArgs: () => (branch ? { keywords: branch } : {}),
-        needDevice: false,
-        needTag: false,
-        defaultRangeDays: 0,
-      })
-    }
-    // 实体全景问题（机构/工程/概念介绍）优先 wiki 页面（每实体一篇百科页）。
-    if (/介绍一下|的简介|的背景|的概况|是什么单位|是什么机构|的全貌/.test(q)) {
-      const stripped = q
-        .replace(/^(请|帮我)?(详细)?(介绍一下|介绍|说明|讲讲)/, '')
-        .replace(/(这个机构|这个单位|这个工程|的情况|的背景|的全貌|[?？。])/g, '')
-        .trim()
+  // 结构化知识意图（明确的时间线/层级/全景措辞）优先专用工具——不要求先命中
+  // 知识关键词（"介绍一下X机构""时间线"未必含"规程/预案"等词，2026-09-29 评审
+  // 发现被 knowledgeOnly 门挡住全部落空）。非实时问句才走知识面。
+  const structuralIntent = knowledgeAvailable && !realtimeHit
+  if (structuralIntent && /时间线|时间轴|时间顺序|先后顺序|事件经过|过程回顾|时间节点/.test(q)) {
+    const kw = /(\d{4})\s*年\s*(\d{1,2})\s*月/.exec(q)
+    const kw2 = /(\d{4})[-年](\d{1,2})/.exec(q)
+    // 两分支都补零：实体名是 2021-09 形态，2021-9 前缀不匹配会让服务端过滤失手。
+    const keywords = kw
+      ? `${kw[1]}-${String(kw[2]).padStart(2, '0')}`
+      : (kw2 ? `${kw2[1]}-${String(kw2[2]).padStart(2, '0')}` : (q.match(/(\d{4})/)?.[1] ?? ''))
+    return route({
+      tools: [knowledgeTimelineTool],
+      baseArgs: () => (keywords ? { keywords } : {}),
+      needDevice: false,
+      needTag: false,
+      defaultRangeDays: 0,
+    })
+  }
+  if (structuralIntent && /分几级|几级响应|分为哪几|哪些类型|有哪些分类|什么级别|响应级别/.test(q)) {
+    // 分支词取意图词（分几级…）之前、词表中最后出现的一个——JS 正则交替按字符串
+    // 位置取胜（"应急预案里应急响应分几级"位置 0 的 应急预案 先赢），而 mindmap
+    // 过滤要的是离意图最近的分支词（应急响应）。
+    const before = q.split(/分几级|几级响应|分为哪几|哪些类型|有哪些分类|响应级别|什么级别/)[0] ?? q
+    const branchWords = ['应急响应', '应急预案', '险情', '物资保障', '应急保障', '后期处置']
+    const branch = branchWords.find(w => before.includes(w)) ?? ''
+    return route({
+      tools: [knowledgeMindmapTool],
+      baseArgs: () => (branch ? { keywords: branch } : {}),
+      needDevice: false,
+      needTag: false,
+      defaultRangeDays: 0,
+    })
+  }
+  if (structuralIntent && /介绍一下|的简介|的背景|的概况|是什么单位|是什么机构|的全貌/.test(q)) {
+    const stripped = q
+      .replace(/^(请|帮我)?(详细)?(介绍一下|介绍|说明|讲讲)/, '')
+      .replace(/(这个机构|这个单位|这个工程|的情况|的背景|的全貌|[?？。])/g, '')
+      .trim()
+    // 剥得出实体名 → wiki 页面；剥不出（"介绍一下这个机构"）→ 回退 search
+    //（getPage('') 必 INVALID_PARAM，search 拿原问句仍可全文检索）。
+    if (stripped) {
       return route({
         tools: [knowledgeWikiPageTool],
-        baseArgs: () => (stripped ? { keywords: stripped } : {}),
+        baseArgs: () => ({ keywords: stripped }),
         needDevice: false,
         needTag: false,
         defaultRangeDays: 0,
       })
     }
+    return route({
+      tools: [knowledgeSearchTool],
+      baseArgs: () => ({}),
+      needDevice: false,
+      needTag: false,
+      defaultRangeDays: 0,
+    })
+  }
+
+  if (knowledgeOnly) {
     return route({
       tools: [knowledgeSearchTool],
       baseArgs: () => ({}),

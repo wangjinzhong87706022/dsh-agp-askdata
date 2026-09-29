@@ -270,7 +270,7 @@ export interface AskdataConfig {
    * 工具组开关（部署形态隔离，默认全开 = 现状 24 工具）：
    * - sql：P0 五 + P1 六 + askdata_deep_analysis（内网 StarRocks/MySQL 取数面，共 12）
    * - api：值班报告二 + meta 元数据面六（AGP REST 网关面，共 8）
-   * - knowledge：RAGFlow 知识面四工具
+   * - knowledge：RAGFlow 知识面五工具
    * 云端 API 部署（如 openagp.top）关 sql：模型工具集里没有任何 SQL 工具，
    * persona 也不会提及，避免"只有光伏域 SQL 工具却被问云端项目"时的工具名幻觉。
    */

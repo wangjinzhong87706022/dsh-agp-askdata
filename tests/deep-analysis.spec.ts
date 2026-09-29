@@ -8,7 +8,11 @@ import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.ts'
 import type { QueryOutput } from '../src/clients/starrocks.ts'
 import type { ToolContext } from '../tools/types.ts'
-import { askdataDeepAnalysisTool } from '../tools/deep-analysis.ts'
+import { askdataDeepAnalysisTool, classify } from '../tools/deep-analysis.ts'
+import { knowledgeSearchTool } from '../tools/knowledge-search.ts'
+import { knowledgeTimelineTool } from '../tools/knowledge-timeline.ts'
+import { knowledgeMindmapTool } from '../tools/knowledge-mindmap.ts'
+import { knowledgeWikiPageTool } from '../tools/knowledge-wiki-page.ts'
 import { allTools } from '../tools/index.ts'
 
 function cfg() {
@@ -142,5 +146,36 @@ describe('askdata_deep_analysis（subagent-style 工具）', () => {
     expect(r.success).toBe(false)
     expect(r.errorCode).toBe('BACKEND_DOWN')
     expect(r.errorMessage).toContain('全部失败')
+  })
+})
+
+describe('classify 知识面专用工具选路（2026-09-29 补）', () => {
+  it('时间线问句 → knowledge_timeline，年月关键词归一补零（kw2 分支）', () => {
+    const plan = classify('2021-9那场洪水的时间线', true)
+    expect(plan.tools[0]).toBe(knowledgeTimelineTool)
+    expect(plan.baseArgs().keywords).toBe('2021-09')
+  })
+
+  it('年月完整问句 → keywords 归一为 2021-09 形态（kw 分支）', () => {
+    const plan = classify('2021年9月洪水的过程回顾', true)
+    expect(plan.tools[0]).toBe(knowledgeTimelineTool)
+    expect(plan.baseArgs().keywords).toBe('2021-09')
+  })
+
+  it('分级问句 → knowledge_mindmap + 分支词提取', () => {
+    const plan = classify('应急预案里应急响应分几级', true)
+    expect(plan.tools[0]).toBe(knowledgeMindmapTool)
+    expect(plan.baseArgs().keywords).toBe('应急响应')
+  })
+
+  it('实体全景问句 → knowledge_wiki_page，动词剥离后作关键词', () => {
+    const plan = classify('介绍一下陕西省桃曲坡水库灌溉中心', true)
+    expect(plan.tools[0]).toBe(knowledgeWikiPageTool)
+    expect(plan.baseArgs().keywords).toBe('陕西省桃曲坡水库灌溉中心')
+  })
+
+  it('R1 回归锁定：剥不出实体名（介绍一下这个机构）→ 回退 knowledgeSearchTool 而非空 keywords 失败', () => {
+    const plan = classify('介绍一下这个机构', true)
+    expect(plan.tools[0]).toBe(knowledgeSearchTool)
   })
 })

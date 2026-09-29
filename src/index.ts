@@ -29,7 +29,7 @@ const apiTools: AskdataTool[] = [...dutyTools, ...metaTools]
 /** 装配完成的问数服务。 */
 export interface AskdataService {
   config: AskdataConfig
-  /** 按配置 toolsets 过滤后的工具面（默认全开 = 24 个；云端 API 形态 12 个）。 */
+  /** 按配置 toolsets 过滤后的工具面（默认全开 = 25 个；云端 API 形态 13 个）。 */
   tools: AskdataTool[]
   /** 构造一次工具调用的上下文；宿主持有 prevAuditHash 以延续审计链。
    * tenantId = 本次调用归属的知识面租户（多租户形态；缺省走 defaultTenant，

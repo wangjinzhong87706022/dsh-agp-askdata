@@ -107,7 +107,7 @@ export const metaTools: AskdataTool[] = [
   queryRelationSegmentTool,
 ]
 
-/** 全部工具（P0 + P1 + subagent-style + 知识面 + 值班报告面 + meta 面，共 24 个）。 */
+/** 全部工具（P0 + P1 + subagent-style + 知识面 + 值班报告面 + meta 面，共 25 个）。 */
 export const allTools: AskdataTool[] = [
   ...p0Tools,
   ...p1Tools,

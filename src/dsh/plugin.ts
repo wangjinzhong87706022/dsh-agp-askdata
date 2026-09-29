@@ -195,8 +195,8 @@ export const Config = z.object({
     api: z.boolean().default(true)
       .description('AGP API 面（共 8 个，走 query.rest 网关）：值班报告 generate_duty_report / list_duty_stations，meta 元数据 model_relation_graph / model_field_list / relation_field_list / query_model / query_model_segment / query_relation_segment'),
     knowledge: z.boolean().default(true)
-      .description('RAGFlow 知识面（4 个：knowledge_graph / knowledge_search / knowledge_wiki_page / knowledge_mindmap）'),
-  }).collapse().description('工具组开关（部署形态隔离；默认全开 = 24 工具。云端 API 形态：sql=false + presetId=askdata-api）'),
+      .description('RAGFlow 知识面（5 个：knowledge_graph / knowledge_search / knowledge_wiki_page / knowledge_mindmap / knowledge_timeline）'),
+  }).collapse().description('工具组开关（部署形态隔离；默认全开 = 25 工具。云端 API 形态：sql=false + presetId=askdata-api）'),
 
   installPreset: z.boolean().default(true).description('启动时把 preset/<presetId>/ 安装到 $DSH_HOME/.agent-presets/（已存在则跳过，绝不覆盖）'),
   presetId: z.string().default('askdata').description('preset 目录名（Web/TUI 里的"AGP问数"入口）；只接受小写字母开头的 kebab-case 短名，内置目录为 askdata / askdata-api'),
